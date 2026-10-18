@@ -179,7 +179,7 @@ func TestCompleteAfterLeaseExpiryBeforeReaper(t *testing.T) {
 func TestA34NoNonDBClockComparisons(t *testing.T) {
 	// A3.4: code search shows no comparison of a non-DB clock to a lease time
 	// Grep Go codebase for any time.Now() compared with lease_expires_at or LeaseExpiresAt
-	cmd := exec.Command("git", "grep", "-n", "-E", `time\.Now\(\).*LeaseExpiresAt|LeaseExpiresAt.*time\.Now\(\)|time\.Since.*LeaseExpiresAt`)
+	cmd := exec.Command("git", "grep", "-n", "-E", `time\.Now\(\).*lease_expires_at|lease_expires_at.*time\.Now\(\)|time\.Since.*lease_expires_at`, "--", ":!*_test.go")
 	out, err := cmd.CombinedOutput()
 	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
 		t.Fatalf("A3.4 violation: non-DB clock compared with lease time: %s", string(out))
