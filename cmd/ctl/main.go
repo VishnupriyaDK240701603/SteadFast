@@ -14,7 +14,7 @@ import (
 const (
 	pinnedGolangciLintImage = "golangci/golangci-lint:v2.15.0"
 	pinnedGitleaksImage     = "zricethezav/gitleaks:v8.30.1"
-	pinnedGovulncheckPkg    = "golang.org/x/vuln/cmd/govulncheck@v1.1.4"
+	pinnedGovulncheckPkg    = "golang.org/x/vuln/cmd/govulncheck@v1.9.0"
 )
 
 func main() {

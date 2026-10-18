@@ -48,7 +48,7 @@ jobs:
           args: --timeout=5m
 
       - name: Govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
       - name: Gitleaks Secret Detection
         uses: gitleaks/gitleaks-action@v2
