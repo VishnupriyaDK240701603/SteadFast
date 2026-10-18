@@ -53,35 +53,50 @@ func main() {
 			logger.Info("reaper shutting down gracefully")
 			return
 		case <-ticker.C:
-			runReaperTick(ctx, logger, pool, st)
+			_, _, _ = runReaperTick(ctx, logger, pool, st)
 		}
 	}
 }
 
-func runReaperTick(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, st *store.Store) {
-	// Acquire advisory lock
+// runReaperTick acquires a dedicated pinned session from the connection pool,
+// takes the session-level advisory lock, executes the reap query on that exact session,
+// and unlocks the advisory lock before releasing the session back to the pool.
+func runReaperTick(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, st *store.Store) (bool, int64, error) {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		logger.Error("failed to acquire dedicated connection for reaper tick", "error", err)
+		return false, 0, err
+	}
+	defer conn.Release()
+
+	// Acquire advisory lock on the pinned connection session
 	var lockAcquired bool
-	err := pool.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", reaperAdvisoryLockID).Scan(&lockAcquired)
+	err = conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", reaperAdvisoryLockID).Scan(&lockAcquired)
 	if err != nil {
 		logger.Error("failed to query advisory lock", "error", err)
-		return
+		return false, 0, err
 	}
 
 	if !lockAcquired {
-		// Another reaper instance holds the lock
-		return
+		// Another reaper instance currently holds the leader lock
+		return false, 0, nil
 	}
+
 	defer func() {
-		_, _ = pool.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", reaperAdvisoryLockID)
+		// Release the advisory lock on the exact same pinned connection
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", reaperAdvisoryLockID)
 	}()
 
-	reaped, err := st.ReapExpiredLeases(ctx)
+	// Execute the reap query on the exact same pinned connection holding the lock
+	reaped, err := st.ReapExpiredLeasesExecutor(ctx, conn)
 	if err != nil {
 		logger.Error("error during lease reaping", "error", err)
-		return
+		return true, 0, err
 	}
 
 	if reaped > 0 {
 		logger.Info("reaped expired leases", "count", reaped)
 	}
+
+	return true, reaped, nil
 }

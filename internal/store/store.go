@@ -821,14 +821,17 @@ func (s *Store) FailJob(ctx context.Context, tenantID, jobID uuid.UUID, fencingT
 	return nextState, nil, nil
 }
 
-// ReapExpiredLeases executes the Appendix B query to recover or dead-letter expired jobs
-func (s *Store) ReapExpiredLeases(ctx context.Context) (int64, error) {
-	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return 0, fmt.Errorf("failed to begin reaper transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+type QueryExec interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
 
+// ReapExpiredLeases executes the Appendix B query to recover or dead-letter expired jobs using the store pool
+func (s *Store) ReapExpiredLeases(ctx context.Context) (int64, error) {
+	return s.ReapExpiredLeasesExecutor(ctx, s.Pool)
+}
+
+// ReapExpiredLeasesExecutor executes the reaper query on a specific pinned connection or pool
+func (s *Store) ReapExpiredLeasesExecutor(ctx context.Context, executor QueryExec) (int64, error) {
 	query := `
 	WITH expired AS (
 		SELECT id FROM jobs
@@ -854,13 +857,9 @@ func (s *Store) ReapExpiredLeases(ctx context.Context) (int64, error) {
 	  AND a.fencing_token = m.fencing_token
 	  AND a.outcome IS NULL;`
 
-	cmdTag, err := tx.Exec(ctx, query)
+	cmdTag, err := executor.Exec(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("reaper query failed: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("failed to commit reaper transaction: %w", err)
 	}
 
 	return cmdTag.RowsAffected(), nil
