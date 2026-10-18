@@ -1,22 +1,27 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"time"
 )
 
 type Config struct {
-	Env                string
-	DatabaseURL        string
-	CheckerDatabaseURL string
-	AdminKey           string
-	LeaseDuration      time.Duration
-	HeartbeatInterval  time.Duration
-	ReaperInterval     time.Duration
-	IdempotencyTTL     time.Duration
-	DefaultMaxAttempts int
-	Port               int
+	Env                 string
+	DatabaseURL         string
+	CheckerDatabaseURL  string
+	AdminKey            string
+	LeaseDuration       time.Duration
+	HeartbeatInterval   time.Duration
+	ReaperInterval      time.Duration
+	IdempotencyTTL      time.Duration
+	DefaultMaxAttempts  int
+	Port                int
+	DisableFencing      bool
+	DisableIdempotency  bool
+	BackoffBase         time.Duration
+	BackoffCap          time.Duration
 }
 
 func Load() (*Config, error) {
@@ -43,18 +48,42 @@ func Load() (*Config, error) {
 	maxAttempts := getEnvInt("DEFAULT_MAX_ATTEMPTS", 5)
 	port := getEnvInt("PORT", 8080)
 
-	return &Config{
-		Env:                env,
-		DatabaseURL:        dbURL,
-		CheckerDatabaseURL: checkerURL,
-		AdminKey:           adminKey,
-		LeaseDuration:      time.Duration(leaseSec) * time.Second,
-		HeartbeatInterval:  time.Duration(hbSec) * time.Second,
-		ReaperInterval:     time.Duration(reaperMs) * time.Millisecond,
-		IdempotencyTTL:     time.Duration(ttlHours) * time.Hour,
-		DefaultMaxAttempts: maxAttempts,
-		Port:               port,
-	}, nil
+	disableFencing := os.Getenv("STEADFAST_DISABLE_FENCING") == "1"
+	disableIdempotency := os.Getenv("STEADFAST_DISABLE_IDEMPOTENCY") == "1"
+
+	baseMs := getEnvInt("BACKOFF_BASE_MS", 100)
+	capMs := getEnvInt("BACKOFF_CAP_MS", 30000)
+
+	cfg := &Config{
+		Env:                 env,
+		DatabaseURL:         dbURL,
+		CheckerDatabaseURL:  checkerURL,
+		AdminKey:            adminKey,
+		LeaseDuration:       time.Duration(leaseSec) * time.Second,
+		HeartbeatInterval:   time.Duration(hbSec) * time.Second,
+		ReaperInterval:      time.Duration(reaperMs) * time.Millisecond,
+		IdempotencyTTL:      time.Duration(ttlHours) * time.Hour,
+		DefaultMaxAttempts:  maxAttempts,
+		Port:                port,
+		DisableFencing:      disableFencing,
+		DisableIdempotency:  disableIdempotency,
+		BackoffBase:         time.Duration(baseMs) * time.Millisecond,
+		BackoffCap:          time.Duration(capMs) * time.Millisecond,
+	}
+
+	if err := cfg.ValidateMutationFlags(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func (c *Config) ValidateMutationFlags() error {
+	// Engine Law 10: Chaos and mutation switches work only when STEADFAST_ENV=demo
+	if (c.DisableFencing || c.DisableIdempotency) && c.Env != "demo" {
+		return errors.New("mutation switches (STEADFAST_DISABLE_FENCING / STEADFAST_DISABLE_IDEMPOTENCY) are strictly forbidden outside demo environment")
+	}
+	return nil
 }
 
 func getEnv(key, defaultVal string) string {
