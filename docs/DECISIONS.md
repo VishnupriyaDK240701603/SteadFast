@@ -23,6 +23,20 @@
 
 ---
 
+## Architectural & Planning Decisions (Prompt 02)
+
+| ID | Decision | Reason |
+|---|---|---|
+| D17 | PostgreSQL driver: `github.com/jackc/pgx/v5` and `pgxpool`. | Industry-standard driver for PostgreSQL in Go; supports high-performance connection pooling, binary protocol, and parameterized queries. |
+| D18 | Database migrations: internal runner in `internal/store/migrate.go` executing `migrations/*.up.sql` and `migrations/*.down.sql`. | Zero external runtime dependencies; deterministic execution embedded directly in Go binaries; tracks applied versions in `schema_migrations`. |
+| D19 | HTTP router: Go standard library `net/http` (`http.ServeMux` with Go 1.22+ pattern routing). | Zero third-party router dependencies; built-in method matching (`POST /v1/jobs`) and path parameter extraction (`GET /v1/jobs/{id}`). |
+| D20 | Structured logging: Go standard library `log/slog` with JSON handler. | Zero external dependencies; high performance; outputs structured JSON logs with request IDs and trace attributes. |
+| D21 | SQLite driver for Mock Ledger: `modernc.org/sqlite`. | 100% pure Go SQLite driver without CGO; cross-compiles cleanly across Windows and Linux without gcc requirements. |
+| D22 | Automated test database: dedicated compose test container on port `5433` managed via `ctl test`. | Guarantees integration tests run against real PostgreSQL as required by quality rules, avoiding Docker socket mounting issues on Windows WSL2. |
+| D23 | Set-based correlation for Invariant I2b and explicit drain states. | Verifier performs symmetric difference join on `(tenant_id, job_id)` between PostgreSQL and SQLite charges to prevent count cancellation; drain timeout exits with `INCOMPLETE (DRAIN_TIMEOUT)`. |
+
+---
+
 ## Tooling and Dependency Pinning Record (Prompt 01)
 
 | Tool / Component | Pinned Version | Source & Reason |
@@ -31,7 +45,7 @@
 | **PostgreSQL Image** | `postgres:17.4-alpine` | Official Docker Hub PostgreSQL image. Stable 17 series on Alpine Linux for minimal memory footprint and fast startup. |
 | **golangci-lint** | `v2.15.0` | Official GitHub release (`golangci/golangci-lint`). Pinned version for linting Go 1.27 code without deprecation warnings. |
 | **gitleaks** | `v8.30.1` | Official GitHub release (`zricethezav/gitleaks`). High-precision secret scanner to prevent credential leaks. |
-| **govulncheck** | `v1.1.4` | Official Go security tooling (`golang.org/x/vuln/cmd/govulncheck`). Standard official vulnerability auditor. |
+| **govulncheck** | `v1.9.0` | Official Go security tooling (`golang.org/x/vuln/cmd/govulncheck`). Updated release supporting Go 1.27 SSA analysis. |
 
 ---
 
@@ -39,7 +53,7 @@
 
 ### Evaluation Finding
 1. **Windows UNC Network Paths (`\\wsl$\Ubuntu\home\dkvis\steadfast`)**:
-   - Accessing the WSL2 ext4 filesystem through Windows 9P UNC share (`\\wsl$\...`) causes Windows `go.exe` to fail with `Incorrect function` (Win32 `ERROR_INVALID_FUNCTION`) because 9P does not support Windows `LockFileEx` record locking.
+   - Accessing the WSL2 ext4 filesystem through Windows 9P UNC share causes Windows `go.exe` to fail with `Incorrect function` (Win32 `ERROR_INVALID_FUNCTION`) because 9P does not support Windows `LockFileEx` record locking.
    - Built-in IDE tool security policies restrict direct read/write tool calls on UNC network roots.
    - Command shells running against UNC paths issue `CMD.EXE was started with the above path as current directory. UNC paths are not supported.` warnings.
 
