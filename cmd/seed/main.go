@@ -114,4 +114,27 @@ func main() {
 	// Security Rule: Never print plaintext API keys to terminal or logs!
 	fmt.Printf("[seed] Successfully provisioned tenants shop-a (%s) and shop-b (%s).\n", tenantA.ID, tenantB.ID)
 	fmt.Println("[seed] Plaintext keys saved strictly to git-ignored .env file.")
+
+	// Pre-seed one poison job for demo DLQ triage (A6.1, F11)
+	poisonJobID := "11111111-1111-1111-1111-111111111111"
+	poisonPayload := `{"order_id":"poison-order-001","customer_id":"cust-dlq","amount_cents":-500}`
+	poisonErr := "downstream 4xx error (status 400): amount_cents must be positive"
+	hashBytes := auth.HashAPIKey(poisonPayload) // simple 64-char sha256 hex string
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO jobs (id, tenant_id, job_type, payload, payload_hash, idempotency_key, state, attempts, max_attempts, last_error, created_at, updated_at)
+		VALUES ($1, $2, 'order.charge', $3::jsonb, $4, 'poison-job-001', 'DEAD', 1, 5, $5, now(), now())
+		ON CONFLICT (id) DO NOTHING;
+	`, poisonJobID, tenantA.ID, poisonPayload, hashBytes, poisonErr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to pre-seed poison job: %v\n", err)
+	} else {
+		_, _ = pool.Exec(ctx, `
+			INSERT INTO job_attempts (job_id, attempt_no, fencing_token, worker_id, started_at, finished_at, outcome, error_class, error_message)
+			SELECT $1, 1, 1, 'worker-seed', now() - interval '5 seconds', now(), 'failed_permanent', 'invalid_amount', $2
+			WHERE NOT EXISTS (SELECT 1 FROM job_attempts WHERE job_id = $1);
+		`, poisonJobID, poisonErr)
+		fmt.Println("[seed] Pre-seeded 1 poison job in DLQ with error history.")
+	}
+
 }

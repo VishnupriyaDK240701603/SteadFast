@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:;">
+  <title>Steadfast vs Baseline — Live Reliability Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-dark">
+  <header class="top-bar">
+    <div class="brand">
+      <span class="logo-icon">&#9878;</span>
+      <h1>STEADFAST <span class="subtitle">Reliability & Chaos Dashboard</span></h1>
+    </div>
+    <div class="controls-bar">
+      <button id="btn-run-demo" class="btn btn-primary" onclick="runDemo()">&#9654; Run Demo</button>
+      <div class="toggle-group">
+        <label for="select-profile">Profile:</label>
+        <select id="select-profile">
+          <option value="short" selected>Short (90s)</option>
+          <option value="full">Full (4m)</option>
+        </select>
+      </div>
+      <div class="beats-group">
+        <button id="btn-beat-1" class="btn btn-secondary" onclick="triggerBeat(1)" title="Key 1">1: Load</button>
+        <button id="btn-beat-2" class="btn btn-secondary" onclick="triggerBeat(2)" title="Key 2">2: Crash</button>
+        <button id="btn-beat-3" class="btn btn-secondary" onclick="triggerBeat(3)" title="Key 3">3: Fault & DLQ</button>
+        <button id="btn-beat-4" class="btn btn-secondary" onclick="triggerBeat(4)" title="Key 4">4: Verdict</button>
+      </div>
+      <div class="chaos-group">
+        <button id="btn-kill-workers" class="btn btn-danger" onclick="triggerChaos('kill-workers')">Kill Workers</button>
+        <button id="btn-kill-pg" class="btn btn-danger" onclick="triggerChaos('kill-postgres')">Kill DB</button>
+        <button id="btn-start-pg" class="btn btn-success" onclick="triggerChaos('start-postgres')">Start DB</button>
+      </div>
+      <button id="btn-toggle-dlq" class="btn btn-outline" onclick="toggleDLQDrawer()">DLQ Drawer (<span id="dlq-count-badge">0</span>)</button>
+    </div>
+  </header>
+
+  <!-- Stakes Banner -->
+  <section class="stakes-banner">
+    <div class="stakes-card steadfast-stakes">
+      <div class="stakes-label">STEADFAST (Transactional Engine)</div>
+      <div class="stakes-row">
+        <div class="stat"><span class="stat-value" id="st-double-charged">0</span><span class="stat-desc">Double Charges</span></div>
+        <div class="stat"><span class="stat-value" id="st-orders-lost">0</span><span class="stat-desc">Orders Lost</span></div>
+        <div class="stat"><span class="stat-value" id="st-dollars-lost">$0.00</span><span class="stat-desc">Dollars Lost</span></div>
+      </div>
+    </div>
+    <div class="vs-badge">VS</div>
+    <div class="stakes-card baseline-stakes">
+      <div class="stakes-label">BASELINE (Redis Visibility Timeout)</div>
+      <div class="stakes-row">
+        <div class="stat"><span class="stat-value text-danger" id="bl-double-charged">0</span><span class="stat-desc">Double Charges</span></div>
+        <div class="stat"><span class="stat-value text-danger" id="bl-orders-lost">0</span><span class="stat-desc">Orders Lost</span></div>
+        <div class="stat"><span class="stat-value text-danger" id="bl-dollars-lost">$0.00</span><span class="stat-desc">Dollars Lost</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Comparison Columns -->
+  <main class="dashboard-grid">
+    <!-- Left Column: Steadfast -->
+    <section class="lane-card" id="lane-steadfast">
+      <div class="lane-header">
+        <h2>Steadfast Engine</h2>
+        <div class="db-status-badge" id="st-db-status">DB Connected</div>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-box"><div class="metric-title">Queue Depth</div><div class="metric-num" id="st-queue-depth">0</div></div>
+        <div class="metric-box"><div class="metric-title">In-Flight (Leased)</div><div class="metric-num" id="st-in-flight">0</div></div>
+        <div class="metric-box"><div class="metric-title">Succeeded</div><div class="metric-num" id="st-succeeded">0</div></div>
+        <div class="metric-box"><div class="metric-title">DLQ (Dead)</div><div class="metric-num text-warning" id="st-dead-count">0</div></div>
+        <div class="metric-box"><div class="metric-title">Active Workers</div><div class="metric-num" id="st-workers">0</div></div>
+        <div class="metric-box"><div class="metric-title">Circuit Breaker</div><div class="metric-num badge-state" id="st-breaker">CLOSED</div></div>
+      </div>
+      <div class="charts-section">
+        <h3>Throughput (jobs/sec)</h3>
+        <canvas id="chart-steadfast-throughput" width="400" height="120"></canvas>
+      </div>
+      <div class="latency-metrics">
+        <span>p50: <strong id="st-p50">0ms</strong></span>
+        <span>p99: <strong id="st-p99">0ms</strong></span>
+      </div>
+    </section>
+
+    <!-- Right Column: Baseline -->
+    <section class="lane-card" id="lane-baseline">
+      <div class="lane-header">
+        <h2>Redis Baseline Queue</h2>
+        <div class="db-status-badge" id="bl-redis-status">Redis Connected</div>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-box"><div class="metric-title">Queue Length</div><div class="metric-num" id="bl-queue-depth">0</div></div>
+        <div class="metric-box"><div class="metric-title">Processing</div><div class="metric-num" id="bl-processing">0</div></div>
+        <div class="metric-box"><div class="metric-title">Completed</div><div class="metric-num" id="bl-completed">0</div></div>
+        <div class="metric-box"><div class="metric-title">Failed List</div><div class="metric-num text-danger" id="bl-failed">0</div></div>
+      </div>
+      <div class="charts-section">
+        <h3>Throughput (jobs/sec)</h3>
+        <canvas id="chart-baseline-throughput" width="400" height="120"></canvas>
+      </div>
+      <div class="latency-metrics">
+        <span>Delivery Guarantee: <strong>At-Least-Once</strong></span>
+        <span>Fencing: <strong>None</strong></span>
+      </div>
+    </section>
+  </main>
+
+  <!-- Verdict Strip -->
+  <footer class="verdict-strip" id="verdict-strip">
+    <div class="verdict-status-box">
+      <span class="verdict-title">Independent Verifier Status:</span>
+      <span class="verdict-badge badge-idle" id="verdict-badge">IDLE</span>
+    </div>
+    <div class="invariants-list" id="invariants-list">
+      <span class="inv-item" id="inv-i1">I1: No Lost Jobs</span>
+      <span class="inv-item" id="inv-i2">I2: No Duplicate Charges</span>
+      <span class="inv-item" id="inv-i2b">I2b: Side-Effect Matching</span>
+      <span class="inv-item" id="inv-i3">I3: Money Conserved</span>
+      <span class="inv-item" id="inv-i4">I4: Zombie Writes Fenced</span>
+    </div>
+  </footer>
+
+  <!-- DLQ Drawer -->
+  <aside class="dlq-drawer" id="dlq-drawer">
+    <div class="drawer-header">
+      <h2>Dead Letter Queue Triage</h2>
+      <button class="btn-close" onclick="toggleDLQDrawer()">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="dlq-jobs-list" id="dlq-jobs-container">
+        <p class="placeholder-text">Loading DLQ jobs...</p>
+      </div>
+      <div class="dlq-editor-panel" id="dlq-editor-panel" style="display:none;">
+        <h3>Edit Payload & Replay</h3>
+        <input type="hidden" id="edit-job-id">
+        <div class="form-group">
+          <label>Job ID:</label>
+          <span id="display-job-id" class="code-span"></span>
+        </div>
+        <div class="form-group">
+          <label for="edit-job-payload">Payload (JSON):</label>
+          <textarea id="edit-job-payload" rows="8"></textarea>
+          <div id="json-error" class="error-msg"></div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" onclick="saveAndReplayJob()">Save & Replay Job</button>
+        </div>
+        <div class="attempts-history" id="attempts-history-container"></div>
+      </div>
+    </div>
+  </aside>
+
+  <script src="app.js"></script>
+</body>
+</html>

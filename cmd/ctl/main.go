@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"flag"
+	"log/slog"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 	"steadfast/internal/config"
+	"steadfast/internal/demo"
 	"steadfast/internal/store"
 )
 
@@ -101,7 +104,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-	case "demo", "demo-short", "bench", "rehearse":
+	case "demo", "demo-short":
+		if err := runDemoCmd(cmd, args); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "bench", "rehearse":
 		fmt.Fprintf(os.Stderr, "subcommand \"%s\" is not implemented yet\n", cmd)
 		os.Exit(2)
 	case "help", "-h", "--help":
@@ -244,7 +252,7 @@ func runMigrate(args []string) error {
 }
 
 func runSeed(_ []string) error {
-	return execCmd("go", "run", "./cmd/seed")
+	return execCmd("go", "run", "steadfast/cmd/seed")
 }
 
 func runTest(args []string) error {
@@ -793,4 +801,60 @@ func runMutationCheck(args []string) error {
 	fmt.Println("Exit Code: 0")
 	fmt.Println("================================================================================")
 	return nil
+}
+
+func getTenantKey() string {
+	if k := os.Getenv("DEMO_TENANT_A_KEY"); k != "" {
+		return k
+	}
+	envBytes, err := os.ReadFile(".env")
+	if err == nil {
+		for _, line := range strings.Split(string(envBytes), "\n") {
+			if strings.HasPrefix(line, "DEMO_TENANT_A_KEY=") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "DEMO_TENANT_A_KEY="))
+			}
+		}
+	}
+	return ""
+}
+
+func runDemoCmd(cmdName string, args []string) error {
+	fs := flag.NewFlagSet(cmdName, flag.ContinueOnError)
+	profile := "short"
+	if cmdName == "demo" {
+		profile = "full"
+	}
+	fs.StringVar(&profile, "profile", profile, "Demo profile: short or full")
+	headless := fs.Bool("headless", false, "Run headlessly without opening browser")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	fmt.Printf("[ctl %s] Launching Steadfast demo choreography (profile=%s, headless=%v)...\n", cmdName, profile, *headless)
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	tenantKey := getTenantKey()
+	adminKey := os.Getenv("ADMIN_KEY")
+
+	// Ensure seed has run so tenants and poison job exist
+	_ = runSeed(nil)
+
+	runnerCfg := demo.RunnerConfig{
+		APIBaseURL:     "http://127.0.0.1:8080",
+		BaselineAPIURL: "http://127.0.0.1:8081",
+		ChaosBaseURL:   "http://127.0.0.1:8083",
+		LedgerBaseURL:  "http://127.0.0.1:8082",
+		DatabaseURL:    cfg.DatabaseURL,
+		TenantKey:      tenantKey,
+		AdminKey:       adminKey,
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	runner := demo.NewRunner(runnerCfg, logger)
+
+	return runner.RunDemo(context.Background(), profile)
 }

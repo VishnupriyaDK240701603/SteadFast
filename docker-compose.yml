@@ -172,6 +172,32 @@ services:
       REDIS_URL: redis://redis:6379
 
 
+
+  dashboard:
+    build:
+      context: .
+      args:
+        TARGET: dashboard
+    image: steadfast-dashboard:latest
+    container_name: steadfast-dashboard
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8085:8085"
+    environment:
+      PORT: "8085"
+      STEADFAST_ENV: ${STEADFAST_ENV:-demo}
+      CHECKER_DATABASE_URL: postgres://steadfast_checker_ro:fake_ro_password_for_local_demo@postgres:5432/${POSTGRES_DB:-steadfast}?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      API_BASE_URL: http://api:8080
+      BASELINE_API_URL: http://baseline-api:8081
+      CHAOS_BASE_URL: http://chaos:8083
+      LEDGER_BASE_URL: http://ledger:8082
+      ADMIN_KEY: ${ADMIN_KEY:-fake_admin_key}
+      DEMO_TENANT_A_KEY: ${DEMO_TENANT_A_KEY:-}
+    profiles:
+      - dashboard
+      - demo
+
   chaos:
     build:
       context: .
