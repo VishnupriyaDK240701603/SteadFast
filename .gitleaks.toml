@@ -1,3 +1,6 @@
+[extend]
+useDefault = true
+
 [allowlist]
 description = "Ignore local git-ignored development env file"
 paths = [
