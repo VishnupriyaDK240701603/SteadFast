@@ -14,6 +14,7 @@ type Config struct {
 	LeaseDuration      time.Duration
 	HeartbeatInterval  time.Duration
 	ReaperInterval     time.Duration
+	IdempotencyTTL     time.Duration
 	DefaultMaxAttempts int
 	Port               int
 }
@@ -38,6 +39,7 @@ func Load() (*Config, error) {
 	leaseSec := getEnvInt("LEASE_SECONDS", 10)
 	hbSec := getEnvInt("HEARTBEAT_SECONDS", 3)
 	reaperMs := getEnvInt("REAPER_INTERVAL_MS", 1000)
+	ttlHours := getEnvInt("IDEMPOTENCY_TTL_HOURS", 24)
 	maxAttempts := getEnvInt("DEFAULT_MAX_ATTEMPTS", 5)
 	port := getEnvInt("PORT", 8080)
 
@@ -49,6 +51,7 @@ func Load() (*Config, error) {
 		LeaseDuration:      time.Duration(leaseSec) * time.Second,
 		HeartbeatInterval:  time.Duration(hbSec) * time.Second,
 		ReaperInterval:     time.Duration(reaperMs) * time.Millisecond,
+		IdempotencyTTL:     time.Duration(ttlHours) * time.Hour,
 		DefaultMaxAttempts: maxAttempts,
 		Port:               port,
 	}, nil
