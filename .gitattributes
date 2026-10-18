@@ -1,0 +1,11 @@
+﻿# Enforce LF line endings across all platforms (Windows, WSL2, Linux)
+* text=auto eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.db binary

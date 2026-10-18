@@ -1,0 +1,46 @@
+﻿# Environment variables and secrets
+.env
+.env.local
+*.env
+
+# Generated test artifacts and verifier logs
+artifacts/
+/artifacts/
+
+# Benchmark results (commit only canonical results.json)
+results/*
+!results/results.json
+
+# SQLite and database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Binaries and build outputs
+bin/
+dist/
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go cache and test files
+cover.out
+coverage.html
+profile.pprof
+
+# IDE and OS metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
