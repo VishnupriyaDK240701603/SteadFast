@@ -27,6 +27,62 @@ services:
       retries: 15
       start_period: 3s
 
+  api:
+    build:
+      context: .
+      args:
+        TARGET: api
+    image: steadfast-api:latest
+    container_name: steadfast-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-steadfast_user}:${POSTGRES_PASSWORD:-fake_dev_password}@postgres:5432/${POSTGRES_DB:-steadfast}?sslmode=disable
+      STEADFAST_ENV: ${STEADFAST_ENV:-prod}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ledger:
+    build:
+      context: .
+      args:
+        TARGET: ledger
+    image: steadfast-ledger:latest
+    container_name: steadfast-ledger
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8082:8082"
+    volumes:
+      - ledger_data:/data
+    environment:
+      LEDGER_PORT: "8082"
+      LEDGER_DB_PATH: "/data/ledger.db"
+      ADMIN_KEY: ${ADMIN_KEY:-fake_admin_key}
+
+  worker:
+    build:
+      context: .
+      args:
+        TARGET: worker-example
+    image: steadfast-worker:latest
+    restart: unless-stopped
+    deploy:
+      replicas: 4
+    environment:
+      API_BASE_URL: http://api:8080
+      LEDGER_BASE_URL: http://ledger:8082
+      TENANT_KEY: ${TENANT_A_KEY:-}
+      CONCURRENCY: "4"
+      POLL_INTERVAL_MS: "500"
+    depends_on:
+      - api
+      - ledger
+
 volumes:
   postgres_data:
     name: steadfast_postgres_data
+  ledger_data:
+    name: steadfast_ledger_data
