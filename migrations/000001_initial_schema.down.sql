@@ -1,0 +1,8 @@
+DROP TRIGGER IF EXISTS trg_audit_job_state ON jobs;
+DROP FUNCTION IF EXISTS audit_job_state_transition();
+
+DROP TABLE IF EXISTS audit_log CASCADE;
+DROP TABLE IF EXISTS job_attempts CASCADE;
+DROP TABLE IF EXISTS idempotency_keys CASCADE;
+DROP TABLE IF EXISTS jobs CASCADE;
+DROP TABLE IF EXISTS tenants CASCADE;
