@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality and Security Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+          cache: true
+
+      - name: Verify Line Endings
+        run: |
+          crlf_files=$(git ls-files --eol | grep 'w/crlf' || true)
+          if [ -n "$crlf_files" ]; then
+            echo "Error: CRLF line endings detected in tracked files:"
+            echo "$crlf_files"
+            exit 1
+          fi
+
+      - name: Go Vet
+        run: go vet ./...
+
+      - name: Run Tests
+        run: go test -v ./...
+
+      - name: Golangci-Lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.15.0
+          args: --timeout=5m
+
+      - name: Govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
+      - name: Gitleaks Secret Detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
