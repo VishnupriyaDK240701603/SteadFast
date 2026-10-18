@@ -9,11 +9,15 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"steadfast/internal/config"
+	"steadfast/internal/store"
 )
 
 const (
+	pinnedPostgresImage     = "postgres:17.4-alpine"
 	pinnedGolangciLintImage = "golangci/golangci-lint:v2.15.0"
-	pinnedGitleaksImage     = "zricethezav/gitleaks:v8.30.1"
+	pinnedGitleaksImage     = "ghcr.io/gitleaks/gitleaks:v8.30.1"
 	pinnedGovulncheckPkg    = "golang.org/x/vuln/cmd/govulncheck@v1.9.0"
 )
 
@@ -42,6 +46,16 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
+	case "migrate":
+		if err := runMigrate(args); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "seed":
+		if err := runSeed(args); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	case "test":
 		if err := runTest(args); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -57,14 +71,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-	case "seed", "demo", "demo-short", "chaos", "verdict", "bench", "rehearse", "mutation-check":
+	case "demo", "demo-short", "chaos", "verdict", "bench", "rehearse", "mutation-check":
 		fmt.Fprintf(os.Stderr, "subcommand \"%s\" is not implemented yet\n", cmd)
 		os.Exit(2)
 	case "help", "-h", "--help":
 		printUsage()
-		os.Exit(0)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n", cmd)
+		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", cmd)
 		printUsage()
 		os.Exit(1)
 	}
@@ -72,7 +85,6 @@ func main() {
 
 func printUsage() {
 	fmt.Println(`Steadfast Control CLI (ctl)
-
 Usage:
   ctl <command> [arguments]
 
@@ -80,6 +92,8 @@ Lifecycle Commands:
   up              Start Postgres service and wait until healthy
   down            Stop all running compose services
   clean           Remove all containers, volumes, and temporary artifacts
+  migrate [up|down|status] Run database migrations
+  seed            Seed demo tenants and generate API keys
 
 Quality and Security Commands:
   test            Run unit and integration test suite
@@ -87,7 +101,7 @@ Quality and Security Commands:
   scan            Run gitleaks secret detection and govulncheck
 
 Subcommands to be implemented in subsequent prompts:
-  seed, demo, demo-short, chaos, verdict, bench, rehearse, mutation-check`)
+  demo, demo-short, chaos, verdict, bench, rehearse, mutation-check`)
 }
 
 func runUp(_ []string) error {
@@ -112,7 +126,8 @@ func runUp(_ []string) error {
 		case <-ctx.Done():
 			return errors.New("timeout waiting for postgres container to become healthy")
 		case <-ticker.C:
-			cmd := exec.Command("docker", "inspect", "--format={{.State.Health.Status}}", "steadfast-postgres")
+			dockerBin := resolveCommand("docker")
+			cmd := exec.Command(dockerBin, "inspect", "--format={{.State.Health.Status}}", "steadfast-postgres")
 			out, err := cmd.Output()
 			if err == nil {
 				status := strings.TrimSpace(string(out))
@@ -150,9 +165,59 @@ func runClean(_ []string) error {
 	return nil
 }
 
+func runMigrate(args []string) error {
+	sub := "up"
+	if len(args) > 0 {
+		sub = args[0]
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := store.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	migrationsDir := "migrations"
+	switch sub {
+	case "up":
+		return store.MigrateUp(ctx, pool, migrationsDir)
+	case "down":
+		return store.MigrateDown(ctx, pool, migrationsDir)
+	case "status":
+		statuses, err := store.GetMigrationStatus(ctx, pool, migrationsDir)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Version | Name | Applied | Applied At")
+		fmt.Println("-------------------------------------")
+		for _, s := range statuses {
+			appliedAt := "pending"
+			if s.Applied && s.AppliedAt != nil {
+				appliedAt = s.AppliedAt.Format(time.RFC3339)
+			}
+			fmt.Printf("%06d  | %-20s | %-7t | %s\n", s.Version, s.Name, s.Applied, appliedAt)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown migrate subcommand: %s (use 'up', 'down', or 'status')", sub)
+	}
+}
+
+func runSeed(_ []string) error {
+	return execCmd("go", "run", "./cmd/seed")
+}
+
 func runTest(args []string) error {
 	fmt.Println("[ctl test] Running test suite...")
-	cmdArgs := append([]string{"test", "-v"}, args...)
+	cmdArgs := append([]string{"test", "-p", "1", "-v"}, args...)
 	if len(args) == 0 {
 		cmdArgs = append(cmdArgs, "./...")
 	}
@@ -211,8 +276,21 @@ func runScan(_ []string) error {
 	return nil
 }
 
+func resolveCommand(name string) string {
+	if name == "docker" {
+		// If docker is not available directly (e.g. in WSL), try docker.exe
+		if _, err := exec.LookPath("docker"); err != nil {
+			if path, err := exec.LookPath("docker.exe"); err == nil {
+				return path
+			}
+		}
+	}
+	return name
+}
+
 func execCmd(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	bin := resolveCommand(name)
+	cmd := exec.Command(bin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

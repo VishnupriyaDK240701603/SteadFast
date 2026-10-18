@@ -1,0 +1,5 @@
+[allowlist]
+description = "Ignore local git-ignored development env file"
+paths = [
+    '''^\.env$'''
+]
