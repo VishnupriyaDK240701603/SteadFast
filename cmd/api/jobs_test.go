@@ -33,6 +33,7 @@ func setupTestAPI(t *testing.T) (http.Handler, *store.Store, *store.Tenant, stri
 	if err != nil {
 		t.Fatalf("store.Connect failed: %v", err)
 	}
+	t.Cleanup(func() { pool.Close() })
 
 	if err := store.MigrateUp(ctx, pool, "../../migrations"); err != nil {
 		t.Fatalf("MigrateUp failed: %v", err)
