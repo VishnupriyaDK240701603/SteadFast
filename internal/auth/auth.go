@@ -83,8 +83,14 @@ func RequireTenantAuth(s *store.Store) func(http.Handler) http.Handler {
 			keyHash := HashAPIKey(rawKey)
 			tenant, err := s.GetTenantByAPIKeyHash(r.Context(), keyHash)
 			if err != nil {
-				// Constant timing / generic error: never reveal whether tenant existed
-				WriteJSONError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing authentication token")
+				if errors.Is(err, store.ErrNotFound) {
+					// Invalid key: constant timing / generic error
+					WriteJSONError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing authentication token")
+					return
+				}
+				// Database unreachable / connection outage: Engine Law 1 & A1.2
+				w.Header().Set("Retry-After", "1")
+				WriteJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "database unreachable")
 				return
 			}
 

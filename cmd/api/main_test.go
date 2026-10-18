@@ -17,7 +17,7 @@ import (
 
 func TestHealthzEndpoint(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	router := SetupRouter(logger, nil, nil)
+	router := SetupRouter(logger, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -40,7 +40,7 @@ func TestReadyzOutageHandling(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 
 	// When pool is nil (outage scenario)
-	routerNilPool := SetupRouter(logger, nil, nil)
+	routerNilPool := SetupRouter(logger, nil, nil, nil)
 	req := httptest.NewRequest("GET", "/readyz", nil)
 	rec := httptest.NewRecorder()
 	routerNilPool.ServeHTTP(rec, req)
@@ -65,7 +65,7 @@ func TestReadyzOutageHandling(t *testing.T) {
 		pool, err := store.Connect(ctx, cfg.DatabaseURL)
 		if err == nil {
 			defer pool.Close()
-			routerHealthy := SetupRouter(logger, pool, nil)
+			routerHealthy := SetupRouter(logger, pool, nil, cfg)
 			reqOK := httptest.NewRequest("GET", "/readyz", nil)
 			recOK := httptest.NewRecorder()
 			routerHealthy.ServeHTTP(recOK, reqOK)
@@ -110,7 +110,7 @@ func TestDecodeStrictJSON(t *testing.T) {
 
 func TestRequestIDHeaderGeneration(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	router := SetupRouter(logger, nil, nil)
+	router := SetupRouter(logger, nil, nil, nil)
 
 	// Case 1: Client provides X-Request-ID
 	req1 := httptest.NewRequest("GET", "/healthz", nil)

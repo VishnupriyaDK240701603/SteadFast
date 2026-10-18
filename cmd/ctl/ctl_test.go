@@ -29,7 +29,7 @@ func TestCtlUsage(t *testing.T) {
 
 	expectedSubstrings := []string{
 		"Steadfast Control CLI (ctl)",
-		"up", "down", "clean", "test", "lint", "scan", "migrate", "seed",
+		"up", "down", "clean", "test", "test-durability", "lint", "scan", "migrate", "seed",
 	}
 
 	for _, sub := range expectedSubstrings {

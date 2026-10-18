@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -12,12 +13,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"steadfast/internal/auth"
 	"steadfast/internal/config"
+	"steadfast/internal/idempotency"
 	"steadfast/internal/store"
 )
 
@@ -25,6 +31,10 @@ type contextKey string
 
 const (
 	requestIDKey contextKey = "steadfast.request_id"
+)
+
+var (
+	typeRegex = regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
 )
 
 func generateRequestID() string {
@@ -94,7 +104,26 @@ func DecodeStrictJSON(r io.Reader, dst any) error {
 	return nil
 }
 
-func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store) http.Handler {
+type SubmitJobPayload struct {
+	Type        string          `json:"type"`
+	Payload     json.RawMessage `json:"payload"`
+	Priority    *int            `json:"priority,omitempty"`
+	RunAt       *string         `json:"run_at,omitempty"`
+	MaxAttempts *int            `json:"max_attempts,omitempty"`
+}
+
+type SubmitJobResponse struct {
+	ID        string `json:"id"`
+	State     string `json:"state"`
+	CreatedAt string `json:"created_at"`
+}
+
+type ListJobsResponse struct {
+	Jobs       []store.Job `json:"jobs"`
+	NextCursor string      `json:"next_cursor,omitempty"`
+}
+
+func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store, cfg *config.Config) http.Handler {
 	mux := http.NewServeMux()
 
 	// Liveness Probe: always 200 if process is running
@@ -119,9 +148,18 @@ func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store) http.H
 		_, _ = w.Write([]byte(`{"status":"ready"}`))
 	})
 
-	// Tenant-authenticated test route (to be expanded in Prompt 04)
-	if s != nil {
+	if s == nil {
+		outageHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "1")
+			auth.WriteJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "database unreachable or service initializing")
+		})
+		mux.Handle("POST /v1/jobs", outageHandler)
+		mux.Handle("GET /v1/jobs", outageHandler)
+		mux.Handle("GET /v1/jobs/", outageHandler)
+	} else {
 		tenantAuth := auth.RequireTenantAuth(s)
+
+		// GET /v1/tenant/me
 		mux.Handle("GET /v1/tenant/me", tenantAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t, ok := auth.TenantFromContext(r.Context())
 			if !ok || t == nil {
@@ -134,6 +172,200 @@ func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store) http.H
 				"name":      t.Name,
 			})
 		})))
+
+		// POST /v1/jobs
+		mux.Handle("POST /v1/jobs", tenantAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tenant, ok := auth.TenantFromContext(r.Context())
+			if !ok || tenant == nil {
+				auth.WriteJSONError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing authentication token")
+				return
+			}
+
+			// Validate Content-Type
+			ct := r.Header.Get("Content-Type")
+			if !strings.HasPrefix(ct, "application/json") {
+				auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", "content-type must be application/json")
+				return
+			}
+
+			// Cap body size to 1 MiB
+			r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
+
+			var req SubmitJobPayload
+			if err := DecodeStrictJSON(r.Body, &req); err != nil {
+				auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("invalid json payload: %v", err))
+				return
+			}
+
+			// Validate type
+			if !typeRegex.MatchString(req.Type) {
+				auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", "type must match ^[a-z0-9_.-]{1,64}$")
+				return
+			}
+
+			// Validate payload
+			trimmedPayload := bytes.TrimSpace(req.Payload)
+			if len(trimmedPayload) == 0 || bytes.Equal(trimmedPayload, []byte("null")) {
+				auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", "payload cannot be empty or null")
+				return
+			}
+			if len(req.Payload) > 65536 {
+				auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", "payload exceeds maximum allowed size of 64 KiB")
+				return
+			}
+
+			canonicalPayload, err := idempotency.CanonicalizeJSON(req.Payload)
+			if err != nil {
+				auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("malformed json payload: %v", err))
+				return
+			}
+			payloadHash := idempotency.HashPayload(canonicalPayload)
+
+			// Validate max_attempts (1 to 20)
+			maxAttempts := 5
+			if cfg != nil && cfg.DefaultMaxAttempts > 0 {
+				maxAttempts = cfg.DefaultMaxAttempts
+			}
+			if req.MaxAttempts != nil {
+				if *req.MaxAttempts < 1 || *req.MaxAttempts > 20 {
+					auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", "max_attempts must be between 1 and 20")
+					return
+				}
+				maxAttempts = *req.MaxAttempts
+			}
+
+			// Validate priority
+			priority := 100
+			if req.Priority != nil {
+				priority = *req.Priority
+			}
+
+			// Validate run_at
+			var runAt time.Time
+			if req.RunAt != nil && *req.RunAt != "" {
+				t, err := time.Parse(time.RFC3339, *req.RunAt)
+				if err != nil {
+					auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", "run_at must be an RFC3339 timestamp")
+					return
+				}
+				runAt = t
+			}
+
+			// Validate Idempotency-Key header
+			idempKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+			if len(idempKey) > 128 {
+				auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", "idempotency key must not exceed 128 characters")
+				return
+			}
+
+			ttl := 24 * time.Hour
+			if cfg != nil && cfg.IdempotencyTTL > 0 {
+				ttl = cfg.IdempotencyTTL
+			}
+
+			submitReq := &store.SubmitJobRequest{
+				JobType:        req.Type,
+				Payload:        canonicalPayload,
+				PayloadHash:    payloadHash,
+				IdempotencyKey: idempKey,
+				Priority:       priority,
+				RunAt:          runAt,
+				MaxAttempts:    maxAttempts,
+			}
+
+			result, err := s.SubmitJob(r.Context(), tenant.ID, submitReq, ttl)
+			if err != nil {
+				if errors.Is(err, store.ErrIdempotencyConflict) {
+					auth.WriteJSONError(w, http.StatusConflict, "idempotency_key_conflict", "idempotency key already used with different payload")
+					return
+				}
+
+				// Engine Law 1: Never answer 202 if transaction cannot commit
+				w.Header().Set("Retry-After", "1")
+				auth.WriteJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "database unreachable or transaction failed")
+				return
+			}
+
+			if result.IsReplayed {
+				w.Header().Set("Idempotent-Replayed", "true")
+			}
+
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(SubmitJobResponse{
+				ID:        result.JobID.String(),
+				State:     result.State,
+				CreatedAt: result.CreatedAt.Format(time.RFC3339Nano),
+			})
+		})))
+
+		// GET /v1/jobs/{id}
+		mux.Handle("GET /v1/jobs/{id}", tenantAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tenant, ok := auth.TenantFromContext(r.Context())
+			if !ok || tenant == nil {
+				auth.WriteJSONError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing authentication token")
+				return
+			}
+
+			idStr := r.PathValue("id")
+			jobID, err := uuid.Parse(idStr)
+			if err != nil {
+				auth.WriteJSONError(w, http.StatusNotFound, "not_found", "job not found")
+				return
+			}
+
+			jobWithAttempts, err := s.GetJobWithAttempts(r.Context(), tenant.ID, jobID)
+			if err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					auth.WriteJSONError(w, http.StatusNotFound, "not_found", "job not found")
+					return
+				}
+				auth.WriteJSONError(w, http.StatusInternalServerError, "internal_error", "failed to retrieve job")
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(jobWithAttempts)
+		})))
+
+		// GET /v1/jobs
+		mux.Handle("GET /v1/jobs", tenantAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tenant, ok := auth.TenantFromContext(r.Context())
+			if !ok || tenant == nil {
+				auth.WriteJSONError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing authentication token")
+				return
+			}
+
+			q := r.URL.Query()
+			state := q.Get("state")
+			if state != "" && state != "QUEUED" && state != "LEASED" && state != "SUCCEEDED" && state != "DEAD" {
+				auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", "invalid state parameter; must be QUEUED, LEASED, SUCCEEDED, or DEAD")
+				return
+			}
+
+			limit := 50
+			if limitStr := q.Get("limit"); limitStr != "" {
+				l, err := strconv.Atoi(limitStr)
+				if err != nil || l < 1 || l > 200 {
+					auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", "limit must be between 1 and 200")
+					return
+				}
+				limit = l
+			}
+
+			cursor := q.Get("cursor")
+			jobs, nextCursor, err := s.ListJobs(r.Context(), tenant.ID, state, limit, cursor)
+			if err != nil {
+				auth.WriteJSONError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("failed to query jobs: %v", err))
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(ListJobsResponse{
+				Jobs:       jobs,
+				NextCursor: nextCursor,
+			})
+		})))
 	}
 
 	handler := RequestIDMiddleware(LoggingMiddleware(logger)(mux))
@@ -141,7 +373,6 @@ func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store) http.H
 }
 
 func main() {
-	// JSON Structured Logging
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -164,7 +395,7 @@ func main() {
 	defer pool.Close()
 
 	s := store.NewStore(pool)
-	router := SetupRouter(logger, pool, s)
+	router := SetupRouter(logger, pool, s, cfg)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	server := &http.Server{
