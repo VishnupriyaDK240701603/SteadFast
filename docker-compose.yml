@@ -2,6 +2,8 @@ services:
   postgres:
     image: postgres:17.4-alpine
     container_name: steadfast-postgres
+    labels:
+      - "steadfast.chaos=allow"
     restart: unless-stopped
     command: >
       postgres
@@ -30,6 +32,8 @@ services:
   redis:
     image: redis:7.4-alpine
     container_name: steadfast-redis
+    labels:
+      - "steadfast.chaos=allow"
     restart: unless-stopped
     command: redis-server --appendonly yes --appendfsync everysec --maxmemory-policy noeviction
     ports:
@@ -88,6 +92,8 @@ services:
       args:
         TARGET: worker-example
     image: steadfast-worker:latest
+    labels:
+      - "steadfast.chaos=allow"
     restart: unless-stopped
     deploy:
       replicas: 4
@@ -124,6 +130,8 @@ services:
       args:
         TARGET: baseline-worker
     image: steadfast-baseline-worker:latest
+    labels:
+      - "steadfast.chaos=allow"
     restart: unless-stopped
     deploy:
       replicas: 4
@@ -162,6 +170,28 @@ services:
       CHECKER_DATABASE_URL: postgres://steadfast_checker_ro:fake_ro_password_for_local_demo@postgres:5432/${POSTGRES_DB:-steadfast}?sslmode=disable
       LEDGER_URL: http://ledger:8082
       REDIS_URL: redis://redis:6379
+
+
+  chaos:
+    build:
+      context: .
+      args:
+        TARGET: chaos
+    image: steadfast-chaos:latest
+    container_name: steadfast-chaos
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8083:8083"
+    environment:
+      PORT: "8083"
+      STEADFAST_ENV: ${STEADFAST_ENV:-demo}
+      ADMIN_KEY: ${ADMIN_KEY:-fake_admin_key}
+      LEDGER_BASE_URL: http://ledger:8082
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    profiles:
+      - chaos
+      - demo
 
 volumes:
   postgres_data:

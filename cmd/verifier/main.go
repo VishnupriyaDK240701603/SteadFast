@@ -692,9 +692,28 @@ func main() {
 	redisURLFlag := flag.String("redis-url", "redis://127.0.0.1:6379", "Redis connection URL")
 	artifactsDirFlag := flag.String("artifacts-dir", "artifacts", "Path to artifacts directory")
 	drainTimeoutFlag := flag.Duration("drain-timeout", 60*time.Second, "Max time to wait for nonterminal jobs to drain")
+	zombieFlag := flag.Bool("zombie", false, "Execute live I4 zombie worker fencing scenario")
+	apiURLFlag := flag.String("api-url", "http://127.0.0.1:8080", "Steadfast API base URL for zombie scenario")
+	apiKeyFlag := flag.String("api-key", "", "Tenant API key for zombie scenario")
 	flag.Parse()
 
 	dbURL := *dbURLFlag
+	if dbURL == "" {
+		dbURL = os.Getenv("CHECKER_DATABASE_URL")
+		if dbURL == "" {
+			dbURL = "postgres://steadfast_checker_ro:fake_ro_password_for_local_demo@127.0.0.1:5432/steadfast?sslmode=disable"
+		}
+	}
+
+	if *zombieFlag {
+		zRes, err := RunLiveZombieScenario(context.Background(), *apiURLFlag, *apiKeyFlag, dbURL, *ledgerURLFlag)
+		data, _ := json.MarshalIndent(zRes, "", "  ")
+		fmt.Println(string(data))
+		if err != nil || zRes.Status != "PASS" {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if dbURL == "" {
 		dbURL = os.Getenv("CHECKER_DATABASE_URL")
 		if dbURL == "" {

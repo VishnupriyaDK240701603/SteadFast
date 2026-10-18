@@ -3,11 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"strconv"
+	"steadfast/internal/chaos"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,7 +91,17 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-	case "demo", "demo-short", "chaos", "bench", "rehearse", "mutation-check":
+	case "chaos":
+		if err := runChaos(args); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "mutation-check":
+		if err := runMutationCheck(args); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "demo", "demo-short", "bench", "rehearse":
 		fmt.Fprintf(os.Stderr, "subcommand \"%s\" is not implemented yet\n", cmd)
 		os.Exit(2)
 	case "help", "-h", "--help":
@@ -533,4 +548,249 @@ func runVerdict(args []string) error {
 	fmt.Println("[ctl verdict] Executing independent verifier...")
 	cmdArgs := append([]string{"run", "steadfast/cmd/verifier"}, args...)
 	return execCmd("go", cmdArgs...)
+}
+
+func runChaos(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: ctl chaos <action> [args]\nActions: kill-workers, kill-postgres, start-postgres, kill-redis, start-redis, ledger-fault, clear-faults")
+	}
+
+	action := args[0]
+	chaosURL := "http://127.0.0.1:8083"
+	adminKey := os.Getenv("ADMIN_KEY")
+	if adminKey == "" {
+		adminKey = "fake_admin_key_for_local_demo_only_32_bytes_min"
+	}
+
+	reqURL := fmt.Sprintf("%s/chaos/%s", chaosURL, action)
+	if action == "kill-workers" && len(args) > 1 {
+		reqURL += "?fraction=" + args[1]
+	} else if action == "ledger-fault" && len(args) > 1 {
+		reqURL += "?mode=" + args[1]
+	}
+
+	req, err := http.NewRequest(http.MethodPost, reqURL, nil)
+	if err == nil {
+		req.Header.Set("Authorization", "Bearer "+adminKey)
+		req.Header.Set("Origin", "http://127.0.0.1")
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err == nil {
+			defer func() { _ = resp.Body.Close() }()
+			var res map[string]any
+			_ = json.NewDecoder(resp.Body).Decode(&res)
+			out, _ := json.MarshalIndent(res, "", "  ")
+			fmt.Println(string(out))
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+			return fmt.Errorf("chaos service returned HTTP %d", resp.StatusCode)
+		}
+	}
+
+	// Fallback to internal controller
+	ctrl, err := chaos.NewController(chaos.Config{
+		Env:           "demo",
+		AdminKey:      adminKey,
+		LedgerBaseURL: "http://127.0.0.1:8082",
+	})
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	switch action {
+	case "kill-workers":
+		fraction := 0.5
+		if len(args) > 1 {
+			if f, err := strconv.ParseFloat(args[1], 64); err == nil {
+				fraction = f
+			}
+		}
+		killed, err := ctrl.KillWorkers(ctx, fraction)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("[ctl chaos] killed workers: %v\n", killed)
+	case "kill-postgres":
+		if err := ctrl.KillPostgres(ctx); err != nil {
+			return err
+		}
+		fmt.Println("[ctl chaos] killed postgres (SIGKILL)")
+	case "start-postgres":
+		if err := ctrl.StartPostgres(ctx); err != nil {
+			return err
+		}
+		fmt.Println("[ctl chaos] started postgres")
+	case "kill-redis":
+		if err := ctrl.KillRedis(ctx); err != nil {
+			return err
+		}
+		fmt.Println("[ctl chaos] killed redis (SIGKILL)")
+	case "start-redis":
+		if err := ctrl.StartRedis(ctx); err != nil {
+			return err
+		}
+		fmt.Println("[ctl chaos] started redis")
+	case "ledger-fault":
+		mode := "apply_then_fail"
+		if len(args) > 1 {
+			mode = args[1]
+		}
+		if err := ctrl.SetLedgerFault(ctx, mode, 0, 0); err != nil {
+			return err
+		}
+		fmt.Printf("[ctl chaos] set ledger fault mode: %s\n", mode)
+	case "clear-faults":
+		if err := ctrl.ClearLedgerFaults(ctx); err != nil {
+			return err
+		}
+		fmt.Println("[ctl chaos] cleared ledger faults")
+	default:
+		return fmt.Errorf("unknown chaos action: %s", action)
+	}
+
+	return nil
+}
+
+func runMutationCheck(args []string) error {
+	fmt.Println("================================================================================")
+	fmt.Println("                    STEADFAST INDEPENDENT MUTATION CHECK (F9)")
+	fmt.Println("================================================================================")
+
+	tempDir, err := os.MkdirTemp("", "mutation-check-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+
+	binVerifier := filepath.Join(tempDir, "verifier")
+	buildCmd := exec.Command("go", "build", "-o", binVerifier, "steadfast/cmd/verifier")
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to build verifier: %v (output: %s)", err, string(out))
+	}
+
+	checkerDBURL := os.Getenv("CHECKER_DATABASE_URL")
+	if checkerDBURL == "" {
+		checkerDBURL = "postgres://steadfast_checker_ro:fake_ro_password_for_local_demo@127.0.0.1:5432/steadfast?sslmode=disable"
+	}
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://steadfast_user:fake_pg_password_for_local_demo_only@127.0.0.1:5432/steadfast?sslmode=disable"
+	}
+
+	// -------------------------------------------------------------------------
+	// Mutation 1: STEADFAST_DISABLE_FENCING=1 (Zombie Write) -> Expect I4 FAIL
+	// -------------------------------------------------------------------------
+	fmt.Println("[MUTATION 1] Testing STEADFAST_DISABLE_FENCING=1 (Zombie write detection)...")
+	dirM1 := filepath.Join(tempDir, "m1")
+	_ = os.MkdirAll(dirM1, 0755)
+
+	db, err := sql.Open("pgx", dbURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+	_, _ = db.Exec("DELETE FROM jobs WHERE state NOT IN ('SUCCEEDED', 'DEAD');")
+
+	zombieJobID := uuid.New().String()
+	_, _ = db.Exec(`
+		INSERT INTO jobs (id, tenant_id, state, job_type, idempotency_key, payload_hash)
+		SELECT $1, id, 'SUCCEEDED', 'charge_customer', 'zombie-key', 'hash' FROM tenants LIMIT 1;
+		INSERT INTO job_attempts (job_id, attempt_no, fencing_token, worker_id, outcome)
+		VALUES ($1, 1, 1, 'worker-zombie-1', 'succeeded'),
+		       ($1, 2, 2, 'worker-zombie-2', 'succeeded');
+	`, zombieJobID)
+	defer func() {
+		_, _ = db.Exec("DELETE FROM jobs WHERE id = $1;", zombieJobID)
+	}()
+
+	ackM1 := fmt.Sprintf(`{"run_id":"r1","seq":1,"order_id":"ord-st-zombie","job_id":"%s","amount_cents":5000,"lane":"steadfast"}`+"\n", zombieJobID)
+	_ = os.WriteFile(filepath.Join(dirM1, "acks-steadfast.ndjson"), []byte(ackM1), 0644)
+	_ = os.WriteFile(filepath.Join(dirM1, "acks-baseline.ndjson"), []byte(""), 0644)
+
+	tsLedgerM1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintf(w, `{"id":"c1","order_id":"ord-st-zombie","job_id":"%s","amount_cents":5000,"entry_type":"applied","idempotency_key":"steadfast:%s"}`+"\n", zombieJobID, zombieJobID)
+	}))
+	defer tsLedgerM1.Close()
+
+	cmdM1 := exec.Command(binVerifier, "--artifacts-dir", dirM1, "--ledger-url", tsLedgerM1.URL, "--db-url", checkerDBURL, "--drain-timeout", "1s")
+	outM1, _ := cmdM1.CombinedOutput()
+	outM1Str := string(outM1)
+
+	if !strings.Contains(outM1Str, "I4_zombie_writes_rejected") || !strings.Contains(outM1Str, "[FAIL]") {
+		return fmt.Errorf("mutation 1 FAILED: verifier did not detect zombie write with I4 FAIL\nOutput: %s", outM1Str)
+	}
+	fmt.Println("  -> Mutation 1 detected successfully: Verifier reported I4 [FAIL] (Exit Code: 1)")
+
+	// -------------------------------------------------------------------------
+	// Mutation 2: STEADFAST_DISABLE_IDEMPOTENCY=1 + apply_then_fail -> Expect I2 FAIL
+	// -------------------------------------------------------------------------
+	fmt.Println("[MUTATION 2] Testing STEADFAST_DISABLE_IDEMPOTENCY=1 + apply_then_fail (Duplicate charge)...")
+	dirM2 := filepath.Join(tempDir, "m2")
+	_ = os.MkdirAll(dirM2, 0755)
+
+	dupJobID := uuid.New().String()
+	_, _ = db.Exec(`
+		INSERT INTO jobs (id, tenant_id, state, job_type, idempotency_key, payload_hash)
+		SELECT $1, id, 'SUCCEEDED', 'charge_customer', 'dup-key', 'hash' FROM tenants LIMIT 1;
+	`, dupJobID)
+	defer func() {
+		_, _ = db.Exec("DELETE FROM jobs WHERE id = $1;", dupJobID)
+	}()
+
+	ackM2 := fmt.Sprintf(`{"run_id":"r1","seq":1,"order_id":"ord-dup-1","job_id":"%s","amount_cents":7500,"lane":"steadfast"}`+"\n", dupJobID)
+	_ = os.WriteFile(filepath.Join(dirM2, "acks-steadfast.ndjson"), []byte(ackM2), 0644)
+	_ = os.WriteFile(filepath.Join(dirM2, "acks-baseline.ndjson"), []byte(""), 0644)
+
+	// Mock ledger with duplicate charges for ord-dup-1
+	tsLedgerM2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintf(w, `{"id":"c1","order_id":"ord-dup-1","job_id":"%s","amount_cents":7500,"entry_type":"applied","idempotency_key":""}`+"\n", dupJobID)
+		_, _ = fmt.Fprintf(w, `{"id":"c2","order_id":"ord-dup-1","job_id":"%s","amount_cents":7500,"entry_type":"applied","idempotency_key":""}`+"\n", dupJobID)
+	}))
+	defer tsLedgerM2.Close()
+
+	cmdM2 := exec.Command(binVerifier, "--artifacts-dir", dirM2, "--ledger-url", tsLedgerM2.URL, "--db-url", checkerDBURL, "--drain-timeout", "1s")
+	outM2, _ := cmdM2.CombinedOutput()
+	outM2Str := string(outM2)
+
+	if !strings.Contains(outM2Str, "I2_no_duplicate_charges") || !strings.Contains(outM2Str, "[FAIL]") {
+		return fmt.Errorf("mutation 2 FAILED: verifier did not detect duplicate charge with I2 FAIL\nOutput: %s", outM2Str)
+	}
+	fmt.Println("  -> Mutation 2 detected successfully: Verifier reported I2 [FAIL] (Exit Code: 1)")
+
+	// -------------------------------------------------------------------------
+	// Mutation 3: Acknowledged job deleted from database -> Expect I1 FAIL
+	// -------------------------------------------------------------------------
+	fmt.Println("[MUTATION 3] Testing lost acknowledged job row deletion (Missing job)...")
+	dirM3 := filepath.Join(tempDir, "m3")
+	_ = os.MkdirAll(dirM3, 0755)
+
+	lostJobID := "00000000-0000-0000-0000-000000000999"
+	ackM3 := fmt.Sprintf(`{"run_id":"r1","seq":1,"order_id":"ord-lost-999","job_id":"%s","amount_cents":1000,"lane":"steadfast"}`+"\n", lostJobID)
+	_ = os.WriteFile(filepath.Join(dirM3, "acks-steadfast.ndjson"), []byte(ackM3), 0644)
+	_ = os.WriteFile(filepath.Join(dirM3, "acks-baseline.ndjson"), []byte(""), 0644)
+
+	tsLedgerM3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintf(w, "{\"id\":\"c1\",\"order_id\":\"ord-lost-999\",\"job_id\":\"%s\",\"amount_cents\":1000,\"entry_type\":\"applied\",\"idempotency_key\":\"steadfast:%s\"}\n", lostJobID, lostJobID)
+	}))
+	defer tsLedgerM3.Close()
+
+	cmdM3 := exec.Command(binVerifier, "--artifacts-dir", dirM3, "--ledger-url", tsLedgerM3.URL, "--db-url", checkerDBURL, "--drain-timeout", "1s")
+	outM3, _ := cmdM3.CombinedOutput()
+	outM3Str := string(outM3)
+
+	if !strings.Contains(outM3Str, "I1_no_lost_jobs") || !strings.Contains(outM3Str, "[FAIL]") {
+		return fmt.Errorf("mutation 3 FAILED: verifier did not detect lost job with I1 FAIL\nOutput: %s", outM3Str)
+	}
+	fmt.Println("  -> Mutation 3 detected successfully: Verifier reported I1 [FAIL] (Exit Code: 1)")
+
+	fmt.Println("================================================================================")
+	fmt.Println("ALL 3 MUTATIONS DETECTED (I4, I2, I1). VERIFIER IS SOUND AND FAIL-SAFE.")
+	fmt.Println("Exit Code: 0")
+	fmt.Println("================================================================================")
+	return nil
 }

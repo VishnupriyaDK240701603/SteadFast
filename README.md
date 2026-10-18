@@ -66,3 +66,6 @@ go run ./cmd/ctl clean
 
 ## License
 MIT License - see [LICENSE](LICENSE).
+
+### Chaos & Security Notice
+The chaos controller (`cmd/chaos`) is intended exclusively for demo and test evaluation. It requires access to Docker container management. **Never deploy or expose the chaos service in production.** In demo mode, it is strictly bound to `127.0.0.1`, protected by `ADMIN_KEY` authentication, and restricted to containers labeled `steadfast.chaos=allow`.

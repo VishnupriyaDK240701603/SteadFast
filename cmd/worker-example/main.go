@@ -45,7 +45,9 @@ func ChargeCustomerHandler(ledgerBaseURL string, client *http.Client) worker.Han
 		}
 
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Idempotency-Key", fmt.Sprintf("steadfast:%s", job.ID.String()))
+		if os.Getenv("STEADFAST_DISABLE_IDEMPOTENCY") != "1" {
+			req.Header.Set("Idempotency-Key", fmt.Sprintf("steadfast:%s", job.ID.String()))
+		}
 		req.Header.Set("X-Fencing-Token", strconv.FormatInt(job.FencingToken, 10))
 
 		resp, err := client.Do(req)

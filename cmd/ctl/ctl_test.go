@@ -41,7 +41,7 @@ func TestCtlUsage(t *testing.T) {
 
 func TestCtlUnimplementedSubcommand(t *testing.T) {
 	bin := buildCtlBinary(t)
-	subcommands := []string{"demo", "demo-short", "chaos", "bench", "rehearse", "mutation-check"}
+	subcommands := []string{"demo", "demo-short", "bench", "rehearse"}
 	for _, sub := range subcommands {
 		cmd := exec.Command(bin, sub)
 		out, err := cmd.CombinedOutput()
@@ -74,5 +74,29 @@ func TestCtlVerdictHelp(t *testing.T) {
 	out, _ := cmd.CombinedOutput()
 	if !strings.Contains(string(out), "Executing independent verifier") {
 		t.Errorf("expected ctl verdict to mention executing independent verifier, got: %s", string(out))
+	}
+}
+
+func TestCtlChaosUsage(t *testing.T) {
+	bin := buildCtlBinary(t)
+	cmd := exec.Command(bin, "chaos")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected ctl chaos without args to fail, got success")
+	}
+	if !strings.Contains(string(out), "usage: ctl chaos") {
+		t.Errorf("expected usage output, got: %s", string(out))
+	}
+}
+
+func TestCtlMutationCheckRuns(t *testing.T) {
+	bin := buildCtlBinary(t)
+	cmd := exec.Command(bin, "mutation-check")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ctl mutation-check failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "ALL 3 MUTATIONS DETECTED") {
+		t.Errorf("expected mutation check summary in output, got: %s", string(out))
 	}
 }
