@@ -41,7 +41,7 @@ func TestCtlUsage(t *testing.T) {
 
 func TestCtlUnimplementedSubcommand(t *testing.T) {
 	bin := buildCtlBinary(t)
-	subcommands := []string{"demo", "demo-short", "chaos", "verdict", "bench", "rehearse", "mutation-check"}
+	subcommands := []string{"demo", "demo-short", "chaos", "bench", "rehearse", "mutation-check"}
 	for _, sub := range subcommands {
 		cmd := exec.Command(bin, sub)
 		out, err := cmd.CombinedOutput()
@@ -65,5 +65,14 @@ func TestCtlUpRefusesMissingEnv(t *testing.T) {
 	}
 	if !strings.Contains(string(out), ".env file is missing") {
 		t.Fatalf("expected error output about missing .env, got: %s", string(out))
+	}
+}
+
+func TestCtlVerdictHelp(t *testing.T) {
+	bin := buildCtlBinary(t)
+	cmd := exec.Command(bin, "verdict", "--help")
+	out, _ := cmd.CombinedOutput()
+	if !strings.Contains(string(out), "Executing independent verifier") {
+		t.Errorf("expected ctl verdict to mention executing independent verifier, got: %s", string(out))
 	}
 }

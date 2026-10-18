@@ -27,6 +27,26 @@ services:
       retries: 15
       start_period: 3s
 
+  redis:
+    image: redis:7.4-alpine
+    container_name: steadfast-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory-policy noeviction
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 2s
+
   api:
     build:
       context: .
@@ -81,8 +101,72 @@ services:
       - api
       - ledger
 
+  baseline-api:
+    build:
+      context: .
+      args:
+        TARGET: baseline-api
+    image: steadfast-baseline-api:latest
+    container_name: steadfast-baseline-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      PORT: "8081"
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  baseline-worker:
+    build:
+      context: .
+      args:
+        TARGET: baseline-worker
+    image: steadfast-baseline-worker:latest
+    restart: unless-stopped
+    deploy:
+      replicas: 4
+    environment:
+      REDIS_URL: redis://redis:6379
+      LEDGER_BASE_URL: http://ledger:8082
+      BASELINE_PATTERN: ${BASELINE_PATTERN:-visibility_timeout}
+      BASELINE_VISIBILITY_SECONDS: ${BASELINE_VISIBILITY_SECONDS:-10}
+      BASELINE_SEND_IDEMPOTENCY_KEY: ${BASELINE_SEND_IDEMPOTENCY_KEY:-false}
+    depends_on:
+      - redis
+      - ledger
+
+  loadgen:
+    build:
+      context: .
+      args:
+        TARGET: loadgen
+    image: steadfast-loadgen:latest
+    profiles:
+      - loadgen
+    environment:
+      API_BASE_URL: http://api:8080
+      BASELINE_API_URL: http://baseline-api:8081
+      TENANT_KEY: ${TENANT_A_KEY:-}
+
+  verifier:
+    build:
+      context: .
+      args:
+        TARGET: verifier
+    image: steadfast-verifier:latest
+    profiles:
+      - verifier
+    environment:
+      CHECKER_DATABASE_URL: postgres://steadfast_checker_ro:fake_ro_password_for_local_demo@postgres:5432/${POSTGRES_DB:-steadfast}?sslmode=disable
+      LEDGER_URL: http://ledger:8082
+      REDIS_URL: redis://redis:6379
+
 volumes:
   postgres_data:
     name: steadfast_postgres_data
+  redis_data:
+    name: steadfast_redis_data
   ledger_data:
     name: steadfast_ledger_data

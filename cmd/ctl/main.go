@@ -81,7 +81,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-	case "demo", "demo-short", "chaos", "verdict", "bench", "rehearse", "mutation-check":
+	case "verdict":
+		if err := runVerdict(args); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "demo", "demo-short", "chaos", "bench", "rehearse", "mutation-check":
 		fmt.Fprintf(os.Stderr, "subcommand \"%s\" is not implemented yet\n", cmd)
 		os.Exit(2)
 	case "help", "-h", "--help":
@@ -110,6 +115,7 @@ Verification Commands:
   test-durability Run Prompt 04 durability SIGKILL scenario (A1.1, A1.2)
   lint            Run go vet and golangci-lint
   scan            Run gitleaks secret detection and govulncheck
+  verdict         Run independent verifier auditing invariants I1-I4
 
 Subcommands to be implemented in subsequent prompts:
   demo, demo-short, chaos, verdict, bench, rehearse, mutation-check`)
@@ -121,7 +127,7 @@ func runUp(_ []string) error {
 	}
 
 	fmt.Println("[ctl up] Starting postgres service via docker compose...")
-	if err := execCmd("docker", "compose", "up", "-d", "postgres"); err != nil {
+	if err := execCmd("docker", "compose", "up", "-d", "postgres", "redis"); err != nil {
 		return fmt.Errorf("failed to start postgres service: %w", err)
 	}
 
@@ -521,4 +527,10 @@ func execCmd(name string, args ...string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func runVerdict(args []string) error {
+	fmt.Println("[ctl verdict] Executing independent verifier...")
+	cmdArgs := append([]string{"run", "steadfast/cmd/verifier"}, args...)
+	return execCmd("go", cmdArgs...)
 }
