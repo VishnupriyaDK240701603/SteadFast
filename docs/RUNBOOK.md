@@ -1,28 +1,99 @@
-# Steadfast: Operator Runbook
+# Steadfast: Production & Operator Runbook
 
-Status: Skeleton (v1 Setup)
+Status: Living Document (Prompt 12 Hardening Pass)
 
-## Common Commands
-- Start Postgres: `go run ./cmd/ctl up`
-- Stop containers: `go run ./cmd/ctl down`
-- Clean all resources: `go run ./cmd/ctl clean`
-- Run test suite: `go run ./cmd/ctl test`
-- Run linters: `go run ./cmd/ctl lint`
-- Run security scans: `go run ./cmd/ctl scan`
+This runbook describes operational procedures, diagnostics, and recovery workflows for operators running Steadfast.
 
-Troubleshooting steps and recovery workflows will be added as features are developed.
+---
 
-## Chaos Controller & Docker Socket Security (F9)
+## 1. Health & Readiness Probes
 
-The chaos controller (`cmd/chaos`) orchestrates failure injection (container kills and restarts, ledger fault modes) to prove queue durability and fencing token correctness under active disruption.
+The API exposes standard Kubernetes-compatible HTTP health probes:
+- **Liveness Probe**: `GET /healthz`
+  - Returns `200 OK` (`{"status":"ok"}`) as long as the process is alive.
+- **Readiness Probe**: `GET /readyz`
+  - Probes live PostgreSQL database connectivity (`pool.Ping()`).
+  - Returns `200 OK` (`{"status":"ready"}`) if healthy.
+  - Returns `503 Service Unavailable` with `Retry-After: 1` if the database is unreachable.
 
-### Docker Socket Risk & Mitigations
-> **SECURITY NOTICE: Never deploy the chaos service in production environments.**
+---
 
-1. **Root Equivalent Privilege**: Access to `/var/run/docker.sock` allows controlling host Docker containers. Mount access is restricted strictly to local developer environments and demo profiles.
-2. **Environment Guard**: The chaos service strictly refuses to start unless `STEADFAST_ENV=demo`.
-3. **Localhost Binding**: Binds exclusively to `127.0.0.1:8083`.
-4. **Authentication**: All state-changing endpoints require `Authorization: Bearer <ADMIN_KEY>`.
-5. **Origin Validation**: State-changing endpoints reject requests from untrusted browser origins (enforcing `http://127.0.0.1:*` or `http://localhost:*`).
-6. **Container Allow-List**: The chaos controller only targets containers labeled with `steadfast.chaos=allow` (or named `steadfast-postgres`, `steadfast-redis`, `steadfast-worker`, `steadfast-baseline-worker`). All unapproved targets are rejected with HTTP 400.
-7. **No Shell Injection**: Commands are invoked using structured argument slices without shell interpolation.
+## 2. Circuit Breaker Triage (F12, P1)
+
+### Symptom
+- Dashboard shows breaker status **`OPEN`** for a specific job type (e.g., `charge_customer`).
+- Jobs of that type remain queued and are skipped by worker claim queries (`internal/breaker`).
+
+### Root Cause
+- The downstream service (e.g., payment ledger) is returning retryable errors (5xx, timeouts, network partition) exceeding the 50% failure threshold over the evaluation window.
+
+### Automated Recovery
+- When the downstream dependency stabilizes, the breaker enters **`HALF_OPEN`** cooldown (default: 15s).
+- A single canary probe job is dispatched.
+- Upon successful execution of the canary job, the breaker automatically transitions back to **`CLOSED`** without operator intervention.
+
+---
+
+## 3. Dead Letter Queue (DLQ) Remediation (F6)
+
+### Symptom
+- Jobs transition to state **`DEAD`** after exhausting their maximum retry attempts (`DEFAULT_MAX_ATTEMPTS=5`).
+- Dashboard DLQ badge indicates non-zero count.
+
+### Step-by-Step Remediation:
+1. **Inspect Dead Jobs**:
+   ```bash
+   curl -s -H "Authorization: Bearer <TENANT_KEY>" http://127.0.0.1:8080/v1/dlq | jq .
+   ```
+2. **Review Error History**:
+   Examine `last_error`, `dead_reason`, and attempt records in the returned JSON.
+3. **Correct Payload (if poisoned/malformed)**:
+   ```bash
+   curl -X PATCH -H "Authorization: Bearer <TENANT_KEY>" \
+        -H "Content-Type: application/json" \
+        -d '{"payload":{"order_id":"ord-123","amount_cents":5000}}' \
+        http://127.0.0.1:8080/v1/dlq/<JOB_ID>
+   ```
+4. **Replay Job**:
+   ```bash
+   curl -X POST -H "Authorization: Bearer <TENANT_KEY>" \
+        http://127.0.0.1:8080/v1/dlq/<JOB_ID>/replay
+   ```
+   The job immediately returns to `QUEUED` with reset attempt counter and is dispatched to available workers.
+
+---
+
+## 4. Database Outage & Failover Recovery
+
+### Behavior During Outage
+- If PostgreSQL stops or restarts, the API stops accepting submissions and returns `503 Service Unavailable` with `Retry-After: 1`.
+- Worker nodes enter exponential backoff jitter sleep without crashing.
+- In-flight jobs whose leases expire during the outage are recovered by the leader reaper as soon as the database is back online.
+
+### Leader Reaper Session Pinning
+- The reaper acquires PostgreSQL advisory lock `987654321`.
+- The lock is pinned to a dedicated connection for the entire lifetime of the process.
+- If the network connection drops or the process terminates, PostgreSQL automatically releases the advisory lock, permitting another instance to assume leadership immediately.
+
+---
+
+## 5. Rate Limiting Incidents (F13, P1)
+
+### Symptom
+- Client receives `429 Too Many Requests` with response header `Retry-After: <seconds>`.
+- Error code: `rate_limit_exceeded`.
+
+### Action
+- The token-bucket rate limiter enforces `RATE_LIMIT_RPS` (default: 5000 RPS) per tenant API key hash in memory.
+- If high-volume batch submissions legitimately require higher throughput, set environment variable `RATE_LIMIT_RPS=<value>` in `.env` and restart the API service.
+
+---
+
+## 6. Chaos Controller & Security Guardrails
+
+> **CRITICAL SECURITY REQUIREMENT: Never expose the chaos controller in production.**
+
+- Restricted to `STEADFAST_ENV=demo`.
+- Binds exclusively to `127.0.0.1:8083`.
+- Strict origin check (`localhost` / `127.0.0.1`).
+- Only controls containers labeled `steadfast.chaos=allow`.

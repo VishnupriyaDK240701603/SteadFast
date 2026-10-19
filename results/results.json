@@ -1,1 +1,31 @@
-﻿{}
+{
+  "system": {
+    "os": "Linux (linux amd64)",
+    "host_os": "Windows 11 (WSL2)",
+    "cpu": "Intel(R) Core(TM) i5-8350U CPU @ 1.70GHz (8 vCPUs)",
+    "cpu_cores": 8,
+    "ram_total_bytes": 8243572736,
+    "ram_total_human": "7.68 GiB",
+    "wsl_memory_cap": "8.00 GiB",
+    "docker_desktop_version": "Server: Docker Desktop 4.94.0 (241994)",
+    "docker_engine_version": "29.8.2",
+    "container_limits": {
+      "postgres_memory": "1536M",
+      "redis_memory": "512M"
+    }
+  },
+  "benchmark": {
+    "submission_latency_p50_ms": 6.65,
+    "submission_latency_p99_ms": 12.2,
+    "sustained_throughput_rps": 84,
+    "duration_seconds": 3.1,
+    "worker_count": 4,
+    "worker_concurrency_per_process": 4,
+    "total_worker_threads": 16,
+    "lost_acknowledged_jobs_under_chaos": 0,
+    "duplicate_side_effects_with_idempotent_handlers": 0,
+    "worker_crash_recovery_time_seconds": 1.25,
+    "postgres_restart_recovery_time_seconds": 2.68
+  },
+  "timestamp": "2026-10-19T02:28:43Z"
+}

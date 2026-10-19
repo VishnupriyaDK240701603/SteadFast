@@ -177,9 +177,9 @@ sequenceDiagram
 
 ---
 
-## 4. Exact Fencing vs. Idempotency Guarantees (No Exactly-Once Claims)
+## 4. Exact Fencing vs. Idempotency Guarantees (Guaranteed Non-Duplication via Receiver Idempotency)
 
-Steadfast explicitly disclaims general "exactly-once execution" across distributed systems. Instead, it provides two distinct, orthogonal guarantees:
+Steadfast explicitly rejects universal duplicate prevention across unreliable networks without receiver cooperation. Instead, it provides two distinct, orthogonal guarantees:
 
 1. **Downstream Side-Effect Protection (Idempotency Key)**:
    - Worker transmits `Idempotency-Key: steadfast:<job_id>` to downstream services.

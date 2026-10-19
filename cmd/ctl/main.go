@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"steadfast/internal/bench"
 	"steadfast/internal/config"
 	"steadfast/internal/demo"
 	"steadfast/internal/store"
@@ -109,7 +110,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-	case "bench", "rehearse":
+	case "bench":
+		if err := runBench(args); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "rehearse":
 		fmt.Fprintf(os.Stderr, "subcommand \"%s\" is not implemented yet\n", cmd)
 		os.Exit(2)
 	case "help", "-h", "--help":
@@ -857,4 +863,29 @@ func runDemoCmd(cmdName string, args []string) error {
 	runner := demo.NewRunner(runnerCfg, logger)
 
 	return runner.RunDemo(context.Background(), profile)
+}
+
+func runBench(_ []string) error {
+	fmt.Println("[ctl bench] Starting Steadfast benchmark suite...")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	resultsDir := "results"
+	res, err := bench.RunBenchmark(ctx, resultsDir)
+	if err != nil {
+		return fmt.Errorf("benchmark run failed: %w", err)
+	}
+
+	fmt.Println("\n=================== BENCHMARK RESULTS ===================")
+	fmt.Printf("Hardware: %s (%d vCPUs), %s RAM\n", res.System.CPU, res.System.CPUCores, res.System.RAMTotalHuman)
+	fmt.Printf("Environment: %s | %s\n", res.System.HostOS, res.System.DockerDesktopVersion)
+	fmt.Printf("Submission Latency p50: %.2f ms\n", res.Benchmark.SubmissionLatencyP50Ms)
+	fmt.Printf("Submission Latency p99: %.2f ms\n", res.Benchmark.SubmissionLatencyP99Ms)
+	fmt.Printf("Sustained Throughput:   %.1f jobs/sec (over %.1fs)\n", res.Benchmark.SustainedThroughputRPS, res.Benchmark.DurationSeconds)
+	fmt.Printf("Lost Acknowledged Jobs: %d (INVARIANT I1)\n", res.Benchmark.LostAcknowledgedJobsUnderChaos)
+	fmt.Printf("Duplicate Side Effects: %d (INVARIANT I2)\n", res.Benchmark.DuplicateSideEffectsWithIdempotentHands)
+	fmt.Printf("Worker Crash Recovery:  %.2fs\n", res.Benchmark.WorkerCrashRecoveryTimeSeconds)
+	fmt.Printf("Postgres Restart Recov: %.2fs\n", res.Benchmark.PostgresRestartRecoveryTimeSeconds)
+	fmt.Println("=========================================================")
+	return nil
 }

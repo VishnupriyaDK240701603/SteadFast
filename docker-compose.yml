@@ -205,6 +205,7 @@ services:
         TARGET: chaos
     image: steadfast-chaos:latest
     container_name: steadfast-chaos
+    user: "0:0"
     restart: unless-stopped
     ports:
       - "127.0.0.1:8083:8083"

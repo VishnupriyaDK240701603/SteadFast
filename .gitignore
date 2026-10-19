@@ -7,9 +7,11 @@
 artifacts/
 /artifacts/
 
-# Benchmark results (commit only canonical results.json)
+# Benchmark results (commit canonical results and charts)
 results/*
 !results/results.json
+!results/chaos_throughput.csv
+!results/chaos_throughput.svg
 
 # SQLite and database files
 *.db
@@ -23,6 +25,7 @@ results/*
 bin/
 dist/
 build/
+/ctl
 *.exe
 *.exe~
 *.dll

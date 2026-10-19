@@ -41,7 +41,7 @@ func TestCtlUsage(t *testing.T) {
 
 func TestCtlUnimplementedSubcommand(t *testing.T) {
 	bin := buildCtlBinary(t)
-	subcommands := []string{"bench", "rehearse"}
+	subcommands := []string{"rehearse"}
 	for _, sub := range subcommands {
 		cmd := exec.Command(bin, sub)
 		out, err := cmd.CombinedOutput()
@@ -98,5 +98,17 @@ func TestCtlMutationCheckRuns(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "ALL 3 MUTATIONS DETECTED") {
 		t.Errorf("expected mutation check summary in output, got: %s", string(out))
+	}
+}
+
+func TestCtlBenchHelp(t *testing.T) {
+	bin := buildCtlBinary(t)
+	cmd := exec.Command(bin, "--help")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ctl --help failed: %v", err)
+	}
+	if !strings.Contains(string(out), "bench") {
+		t.Errorf("expected usage output to mention bench")
 	}
 }
