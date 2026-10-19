@@ -22,6 +22,7 @@ type Config struct {
 	DisableIdempotency  bool
 	BackoffBase         time.Duration
 	BackoffCap          time.Duration
+	RateLimitRPS        int
 }
 
 func Load() (*Config, error) {
@@ -53,6 +54,7 @@ func Load() (*Config, error) {
 
 	baseMs := getEnvInt("BACKOFF_BASE_MS", 100)
 	capMs := getEnvInt("BACKOFF_CAP_MS", 30000)
+	rateLimitRPS := getEnvInt("RATE_LIMIT_RPS", 5000)
 
 	cfg := &Config{
 		Env:                 env,
@@ -69,6 +71,7 @@ func Load() (*Config, error) {
 		DisableIdempotency:  disableIdempotency,
 		BackoffBase:         time.Duration(baseMs) * time.Millisecond,
 		BackoffCap:          time.Duration(capMs) * time.Millisecond,
+		RateLimitRPS:        rateLimitRPS,
 	}
 
 	if err := cfg.ValidateMutationFlags(); err != nil {

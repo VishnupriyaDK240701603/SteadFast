@@ -19,7 +19,9 @@ import (
 	"syscall"
 	"time"
 
+	"math"
 	"github.com/google/uuid"
+	"steadfast/internal/ratelimit"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"steadfast/internal/auth"
 	"steadfast/internal/backoff"
@@ -194,9 +196,14 @@ func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store, cfg *c
 	} else {
 		tenantAuth := auth.RequireTenantAuth(s)
 		bo := backoff.New(100*time.Millisecond, 30*time.Second)
+		rps := 5000
 		if cfg != nil {
 			bo = backoff.New(cfg.BackoffBase, cfg.BackoffCap)
+			if cfg.RateLimitRPS > 0 {
+				rps = cfg.RateLimitRPS
+			}
 		}
+		limiter := ratelimit.NewTokenBucketLimiter(rps)
 
 		// GET /v1/tenant/me
 		mux.Handle("GET /v1/tenant/me", tenantAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +225,20 @@ func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store, cfg *c
 			if !ok || tenant == nil {
 				auth.WriteJSONError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing authentication token")
 				return
+			}
+
+			// Rate limit per authenticated tenant key hash (F13, P1)
+			if limiter != nil {
+				allowed, waitDuration := limiter.Allow(tenant.APIKeyHash)
+				if !allowed {
+					retryAfterSec := int(math.Ceil(waitDuration.Seconds()))
+					if retryAfterSec < 1 {
+						retryAfterSec = 1
+					}
+					w.Header().Set("Retry-After", strconv.Itoa(retryAfterSec))
+					auth.WriteJSONError(w, http.StatusTooManyRequests, "rate_limit_exceeded", "rate limit exceeded: too many requests")
+					return
+				}
 			}
 
 			// Validate Content-Type
@@ -832,7 +853,7 @@ func main() {
 	<-ctx.Done()
 	logger.Info("shutting down steadfast api server gracefully")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {

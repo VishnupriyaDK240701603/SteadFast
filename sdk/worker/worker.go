@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"io"
 	"log/slog"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +37,7 @@ type Config struct {
 	Concurrency    int
 	ClaimBatchSize int
 	PollInterval   time.Duration
+	DrainTimeout   time.Duration // Default 25s for graceful drain on SIGTERM
 	HTTPClient     *http.Client
 	Logger         *slog.Logger
 }
@@ -92,6 +93,9 @@ func Run(ctx context.Context, cfg Config) error {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 1 * time.Second
 	}
+	if cfg.DrainTimeout <= 0 {
+		cfg.DrainTimeout = 25 * time.Second
+	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: 15 * time.Second}
 	}
@@ -107,48 +111,39 @@ func Run(ctx context.Context, cfg Config) error {
 	jobsChan := make(chan *Job, cfg.Concurrency)
 	var wg sync.WaitGroup
 
+	drainCtx, cancelDrain := context.WithCancel(context.Background())
+	defer cancelDrain()
+
 	for i := 0; i < cfg.Concurrency; i++ {
 		wg.Add(1)
 		go func(workerIndex int) {
 			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case job, ok := <-jobsChan:
-					if !ok {
-						return
-					}
-					processJob(ctx, cfg, job)
-				}
+			for job := range jobsChan {
+				processJob(drainCtx, cfg, job)
 			}
 		}(i)
 	}
 
-	defer func() {
-		close(jobsChan)
-		wg.Wait()
-	}()
-
 	backoffSleep := 500 * time.Millisecond
 	maxBackoff := 10 * time.Second
 
+	claimLoop:
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			break claimLoop
 		default:
 		}
 
 		jobs, err := claimJobs(ctx, cfg, types, cfg.ClaimBatchSize)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return nil
+				break claimLoop
 			}
 			cfg.Logger.Warn("claim failed, retrying with backoff", "error", err)
 			select {
 			case <-ctx.Done():
-				return nil
+				break claimLoop
 			case <-time.After(jitterDuration(backoffSleep)):
 				backoffSleep = min(backoffSleep*2, maxBackoff)
 				continue
@@ -160,7 +155,7 @@ func Run(ctx context.Context, cfg Config) error {
 		if len(jobs) == 0 {
 			select {
 			case <-ctx.Done():
-				return nil
+				break claimLoop
 			case <-time.After(jitterDuration(cfg.PollInterval)):
 				continue
 			}
@@ -169,11 +164,31 @@ func Run(ctx context.Context, cfg Config) error {
 		for _, job := range jobs {
 			select {
 			case <-ctx.Done():
-				return nil
+				break claimLoop
 			case jobsChan <- job:
 			}
 		}
 	}
+
+	cfg.Logger.Info("worker claim loop stopped, initiating graceful drain", "drain_timeout", cfg.DrainTimeout)
+	close(jobsChan)
+
+	drainDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(drainDone)
+	}()
+
+	select {
+	case <-drainDone:
+		cfg.Logger.Info("all in-flight jobs completed cleanly within drain period")
+	case <-time.After(cfg.DrainTimeout):
+		cfg.Logger.Warn("drain timeout expired, cancelling in-flight jobs and abandoning to reaper")
+		cancelDrain()
+		<-drainDone
+	}
+
+	return nil
 }
 
 func processJob(parentCtx context.Context, cfg Config, job *Job) {
@@ -321,8 +336,11 @@ func reportJobCompletion(ctx context.Context, cfg Config, jobID uuid.UUID, fenci
 	})
 
 	url := fmt.Sprintf("%s/v1/worker/jobs/%s/complete", cfg.APIBaseURL, jobID)
+	reportCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	for attempt := 0; attempt < 3; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+		req, err := http.NewRequestWithContext(reportCtx, http.MethodPost, url, bytes.NewReader(reqBody))
 		if err != nil {
 			return err
 		}
@@ -353,8 +371,11 @@ func reportJobFailure(ctx context.Context, cfg Config, jobID uuid.UUID, fencingT
 	})
 
 	url := fmt.Sprintf("%s/v1/worker/jobs/%s/fail", cfg.APIBaseURL, jobID)
+	reportCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	for attempt := 0; attempt < 3; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+		req, err := http.NewRequestWithContext(reportCtx, http.MethodPost, url, bytes.NewReader(reqBody))
 		if err != nil {
 			return err
 		}

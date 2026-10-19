@@ -265,6 +265,184 @@ func TestWorkerRun_PanicRecoveryReportsRetryable(t *testing.T) {
 	}
 }
 
+func TestWorkerRun_GracefulShutdown_DrainsInFlightJobs(t *testing.T) {
+	jobID := uuid.New()
+	var claimedCount int32
+	var completedCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/v1/worker/claim"):
+			if atomic.AddInt32(&claimedCount, 1) == 1 {
+				jobs := []*Job{
+					{
+						ID:           jobID,
+						Type:         "drain_task",
+						Payload:      json.RawMessage(`{}`),
+						FencingToken: 100,
+						Attempt:      1,
+						MaxAttempts:  5,
+						LeaseSeconds: 10,
+					},
+				}
+				_ = json.NewEncoder(w).Encode(jobs)
+				return
+			}
+			_ = json.NewEncoder(w).Encode([]*Job{})
+		case strings.HasSuffix(r.URL.Path, "/complete"):
+			atomic.AddInt32(&completedCount, 1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	jobStarted := make(chan struct{})
+	jobCompleted := make(chan struct{})
+
+	cfg := Config{
+		APIBaseURL:   server.URL,
+		APIKey:       "test-key",
+		WorkerID:     "drain-worker",
+		PollInterval: 50 * time.Millisecond,
+		DrainTimeout: 2 * time.Second,
+		Handlers: map[string]Handler{
+			"drain_task": func(ctx context.Context, job *Job) error {
+				close(jobStarted)
+				// Simulates in-flight job processing that takes 200ms
+				time.Sleep(200 * time.Millisecond)
+				close(jobCompleted)
+				return nil
+			},
+		},
+	}
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- Run(ctx, cfg)
+	}()
+
+	// Wait until the job starts executing
+	<-jobStarted
+
+	// Trigger SIGTERM by canceling ctx while job is in-flight
+	cancel()
+
+	// Wait for Run to return
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected Run to return nil on graceful shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Run did not finish draining in time")
+	}
+
+	// Verify job actually completed
+	select {
+	case <-jobCompleted:
+	default:
+		t.Fatalf("expected in-flight job to have completed during drain")
+	}
+
+	if atomic.LoadInt32(&completedCount) != 1 {
+		t.Fatalf("expected completedCount == 1, got %d", atomic.LoadInt32(&completedCount))
+	}
+}
+
+func TestWorkerRun_GracefulShutdown_DrainTimeoutAbandonsToReaper(t *testing.T) {
+	jobID := uuid.New()
+	var claimedCount int32
+	var completedCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/v1/worker/claim"):
+			if atomic.AddInt32(&claimedCount, 1) == 1 {
+				jobs := []*Job{
+					{
+						ID:           jobID,
+						Type:         "long_task",
+						Payload:      json.RawMessage(`{}`),
+						FencingToken: 101,
+						Attempt:      1,
+						MaxAttempts:  5,
+						LeaseSeconds: 10,
+					},
+				}
+				_ = json.NewEncoder(w).Encode(jobs)
+				return
+			}
+			_ = json.NewEncoder(w).Encode([]*Job{})
+		case strings.HasSuffix(r.URL.Path, "/complete"):
+			atomic.AddInt32(&completedCount, 1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	jobStarted := make(chan struct{})
+	handlerCanceled := make(chan struct{})
+
+	cfg := Config{
+		APIBaseURL:   server.URL,
+		APIKey:       "test-key",
+		WorkerID:     "drain-timeout-worker",
+		PollInterval: 50 * time.Millisecond,
+		DrainTimeout: 100 * time.Millisecond, // very short drain timeout
+		Handlers: map[string]Handler{
+			"long_task": func(ctx context.Context, job *Job) error {
+				close(jobStarted)
+				select {
+				case <-ctx.Done():
+					close(handlerCanceled)
+					return ctx.Err()
+				case <-time.After(2 * time.Second):
+					return nil
+				}
+			},
+		},
+	}
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- Run(ctx, cfg)
+	}()
+
+	<-jobStarted
+	// Trigger SIGTERM
+	cancel()
+
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected Run to return nil, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Run hung past drain timeout")
+	}
+
+	// Verify handler context was canceled by the drain timeout
+	select {
+	case <-handlerCanceled:
+	default:
+		t.Fatalf("expected handler context to be canceled when drain timeout expired")
+	}
+
+	if atomic.LoadInt32(&completedCount) != 0 {
+		t.Fatalf("expected job not to be marked completed when drain timeout hit, got %d", atomic.LoadInt32(&completedCount))
+	}
+}
+
 func TestWorkerNoDBOrClockComparison(t *testing.T) {
 	data, err := os.ReadFile("worker.go")
 	if err != nil {
