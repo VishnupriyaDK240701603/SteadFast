@@ -54,9 +54,9 @@ All figures below are measured on the reference test system and committed to [`r
 | **Lost Acknowledged Jobs** | **0** | Multiple lost on worker crash | Invariant I1 (Zero Loss) |
 | **Duplicate Side Effects** | **0** | Double-charges ($1,250+) | Invariant I2 (Non-Duplication) |
 | **Fencing Monotonicity** | **0 stale writes** | Stale overwrites accepted | Invariant I4 (Monotonic Fencing) |
-| **Submission Latency (p50)** | **6.65 ms** | 1.10 ms (in-memory) | `results/results.json` |
-| **Submission Latency (p99)** | **12.20 ms** | 3.45 ms (in-memory) | `results/results.json` |
-| **Sustained Throughput** | **84.0 jobs/sec** | 160.0 jobs/sec | Single PostgreSQL primary |
+| **Submission Latency (p50)** | **7.46 ms** | 1.10 ms (in-memory) | `results/results.json` |
+| **Submission Latency (p99)** | **17.58 ms** | 3.45 ms (in-memory) | `results/results.json` |
+| **Sustained Throughput** | **84.4 jobs/sec** | 160.0 jobs/sec | Single PostgreSQL primary |
 | **Worker Crash Recovery** | **1.25 s** | Visibility timeout (10.0 s) | Automatic reaper recovery |
 | **Postgres Restart Recovery** | **2.68 s** | N/A (Redis crash loses data) | Auto-reconnect & resume |
 

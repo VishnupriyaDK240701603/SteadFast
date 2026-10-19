@@ -291,7 +291,7 @@ func main() {
 		port = "8083"
 	}
 
-	addr := fmt.Sprintf("127.0.0.1:%s", port)
+	addr := fmt.Sprintf(":%s", port)
 	logger.Info("starting chaos service", "addr", addr)
 	httpServer := &http.Server{
 		Addr:              addr,

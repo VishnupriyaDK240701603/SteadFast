@@ -1107,3 +1107,130 @@ func (s *Store) GetAuditEntriesForJob(ctx context.Context, tenantID, jobID uuid.
 
 	return entries, nil
 }
+
+
+type TimelineAttempt struct {
+	AttemptNo    int        `json:"attempt_no"`
+	FencingToken int64      `json:"fencing_token"`
+	WorkerID     string     `json:"worker_id"`
+	StartedAt    time.Time  `json:"started_at"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	Outcome      *string    `json:"outcome,omitempty"`
+	ErrorClass   *string    `json:"error_class,omitempty"`
+	ErrorMessage string     `json:"error_message,omitempty"`
+}
+
+type TimelineEvent struct {
+	Timestamp time.Time      `json:"timestamp"`
+	Actor     string         `json:"actor"`
+	Action    string         `json:"action"`
+	FromState *string        `json:"from_state,omitempty"`
+	ToState   *string        `json:"to_state,omitempty"`
+	Details   map[string]any `json:"details,omitempty"`
+}
+
+type JobTimeline struct {
+	JobID      uuid.UUID         `json:"job_id"`
+	TenantID   uuid.UUID         `json:"tenant_id"`
+	JobType    string            `json:"job_type"`
+	State      string            `json:"state"`
+	CreatedAt  time.Time         `json:"created_at"`
+	FinishedAt *time.Time        `json:"finished_at,omitempty"`
+	Attempts   []TimelineAttempt `json:"attempts"`
+	Events     []TimelineEvent   `json:"events"`
+}
+
+func (s *Store) RecordStaleWriteRejected(ctx context.Context, tenantID, jobID uuid.UUID, endpoint, workerID string, presentedToken int64) error {
+	var currentToken int64
+	err := s.Pool.QueryRow(ctx, "SELECT fencing_token FROM jobs WHERE id = $1 AND tenant_id = $2", jobID, tenantID).Scan(&currentToken)
+	if err != nil {
+		currentToken = 0
+	}
+	details := fmt.Sprintf(`{"endpoint":%q,"presented_token":%d,"current_token":%d,"worker_id":%q}`, endpoint, presentedToken, currentToken, workerID)
+	query := `
+		INSERT INTO audit_log (tenant_id, actor, action, job_id, details)
+		SELECT $1, $2, 'stale_write_rejected', $3, $4::jsonb
+		WHERE (
+			SELECT COUNT(*) FROM audit_log 
+			WHERE job_id = $3 AND action = 'stale_write_rejected'
+		) < 20;
+	`
+	actor := workerID
+	if actor == "" {
+		actor = "worker"
+	}
+	_, err = s.Pool.Exec(ctx, query, tenantID, actor, jobID, details)
+	return err
+}
+
+func (s *Store) GetJobTimeline(ctx context.Context, tenantID, jobID uuid.UUID) (*JobTimeline, error) {
+	j, err := s.GetJobByID(ctx, tenantID, jobID)
+	if err != nil {
+		return nil, err
+	}
+
+	attemptsQuery := `
+	SELECT attempt_no, fencing_token, worker_id, started_at, finished_at, outcome, error_class, error_message
+	FROM job_attempts
+	WHERE job_id = $1
+	ORDER BY attempt_no ASC;`
+
+	aRows, err := s.Pool.Query(ctx, attemptsQuery, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query attempts for timeline: %w", err)
+	}
+	defer aRows.Close()
+
+	attempts := make([]TimelineAttempt, 0)
+	for aRows.Next() {
+		var a TimelineAttempt
+		var rawErrMsg *string
+		if err := aRows.Scan(&a.AttemptNo, &a.FencingToken, &a.WorkerID, &a.StartedAt, &a.FinishedAt, &a.Outcome, &a.ErrorClass, &rawErrMsg); err != nil {
+			return nil, fmt.Errorf("failed to scan timeline attempt: %w", err)
+		}
+		if rawErrMsg != nil {
+			msg := *rawErrMsg
+			if len(msg) > 500 {
+				msg = msg[:500]
+			}
+			a.ErrorMessage = msg
+		}
+		attempts = append(attempts, a)
+	}
+
+	auditQuery := `
+	SELECT ts, actor, action, from_state, to_state, details
+	FROM audit_log
+	WHERE job_id = $1 AND tenant_id = $2
+	ORDER BY id ASC;`
+
+	evRows, err := s.Pool.Query(ctx, auditQuery, jobID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query audit log for timeline: %w", err)
+	}
+	defer evRows.Close()
+
+	events := make([]TimelineEvent, 0)
+	for evRows.Next() {
+		var ev TimelineEvent
+		var rawDetails []byte
+		if err := evRows.Scan(&ev.Timestamp, &ev.Actor, &ev.Action, &ev.FromState, &ev.ToState, &rawDetails); err != nil {
+			return nil, fmt.Errorf("failed to scan timeline event: %w", err)
+		}
+		if len(rawDetails) > 0 {
+			_ = json.Unmarshal(rawDetails, &ev.Details)
+		}
+		events = append(events, ev)
+	}
+
+	return &JobTimeline{
+		JobID:      j.ID,
+		TenantID:   j.TenantID,
+		JobType:    j.JobType,
+		State:      j.State,
+		CreatedAt:  j.CreatedAt,
+		FinishedAt: j.FinishedAt,
+		Attempts:   attempts,
+		Events:     events,
+	}, nil
+}

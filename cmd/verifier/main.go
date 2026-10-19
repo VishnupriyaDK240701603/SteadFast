@@ -695,6 +695,7 @@ func main() {
 	zombieFlag := flag.Bool("zombie", false, "Execute live I4 zombie worker fencing scenario")
 	apiURLFlag := flag.String("api-url", "http://127.0.0.1:8080", "Steadfast API base URL for zombie scenario")
 	apiKeyFlag := flag.String("api-key", "", "Tenant API key for zombie scenario")
+	tenantKeyFlag := flag.String("tenant-key", "", "Tenant API key alias")
 	flag.Parse()
 
 	dbURL := *dbURLFlag
@@ -703,6 +704,11 @@ func main() {
 		if dbURL == "" {
 			dbURL = "postgres://steadfast_checker_ro:fake_ro_password_for_local_demo@127.0.0.1:5432/steadfast?sslmode=disable"
 		}
+	}
+
+	apiKey := *apiKeyFlag
+	if apiKey == "" {
+		apiKey = *tenantKeyFlag
 	}
 
 	if *zombieFlag {

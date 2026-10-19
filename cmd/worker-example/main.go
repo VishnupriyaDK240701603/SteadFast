@@ -31,6 +31,27 @@ func ChargeCustomerHandler(ledgerBaseURL string, client *http.Client) worker.Han
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
 	return func(ctx context.Context, job *worker.Job) error {
+		var sim struct {
+			SimulationMode string `json:"simulation_mode"`
+			SleepSeconds   int    `json:"sleep_seconds"`
+		}
+		_ = json.Unmarshal(job.Payload, &sim)
+
+		if sim.SleepSeconds > 0 {
+			time.Sleep(time.Duration(sim.SleepSeconds) * time.Second)
+		}
+		if sim.SimulationMode == "retry_once" && job.Attempt == 1 {
+			return worker.Retryable(fmt.Errorf("simulated network timeout on attempt 1 (will auto-retry)"))
+		}
+		if sim.SimulationMode == "poison_fail" {
+			return worker.Permanent(fmt.Errorf("simulated fatal error: card expired or unrecoverable error"))
+		}
+		if sim.SimulationMode == "crash_reaper" && job.Attempt == 1 {
+			slog.Warn("💥 JURY FLOW: Worker simulating hard crash (SIGKILL mid-execution)", "job_id", job.ID, "attempt", job.Attempt)
+			_ = syscall.Kill(syscall.Getpid(), syscall.SIGKILL)
+			return nil
+		}
+
 		var payload ChargePayload
 		if err := json.Unmarshal(job.Payload, &payload); err != nil {
 			return worker.Permanent(fmt.Errorf("malformed payload: %w", err))
@@ -72,6 +93,27 @@ func ChargeCustomerHandler(ledgerBaseURL string, client *http.Client) worker.Han
 
 		// 5xx and others
 		return worker.Retryable(fmt.Errorf("downstream 5xx error (status %d): %s", resp.StatusCode, string(respBytes)))
+	}
+}
+
+func GenericSimulationHandler(name string) worker.Handler {
+	return func(ctx context.Context, job *worker.Job) error {
+		var sim struct {
+			SimulationMode string `json:"simulation_mode"`
+			SleepSeconds   int    `json:"sleep_seconds"`
+		}
+		_ = json.Unmarshal(job.Payload, &sim)
+
+		if sim.SleepSeconds > 0 {
+			time.Sleep(time.Duration(sim.SleepSeconds) * time.Second)
+		}
+		if sim.SimulationMode == "retry_once" && job.Attempt == 1 {
+			return worker.Retryable(fmt.Errorf("simulated %s timeout on attempt 1 (auto-retrying)", name))
+		}
+		if sim.SimulationMode == "poison_fail" {
+			return worker.Permanent(fmt.Errorf("simulated fatal %s validation failure (dead-lettered)", name))
+		}
+		return nil
 	}
 }
 
@@ -123,6 +165,10 @@ func main() {
 		Logger:         logger,
 		Handlers: map[string]worker.Handler{
 			"charge_customer": ChargeCustomerHandler(ledgerBaseURL, nil),
+			"order.charge":    ChargeCustomerHandler(ledgerBaseURL, nil),
+			"email_dispatch":  GenericSimulationHandler("email_dispatch"),
+			"data_pipeline":   GenericSimulationHandler("data_pipeline"),
+			"report_generate": GenericSimulationHandler("report_generate"),
 		},
 	}
 

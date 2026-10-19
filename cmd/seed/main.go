@@ -23,7 +23,7 @@ func generateAPIKey() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-func updateEnvFile(keyA, keyB string) error {
+func updateEnvFile(keyA, keyB, opsToken string) error {
 	envPath := ".env"
 	contentBytes, err := os.ReadFile(envPath)
 	content := ""
@@ -50,6 +50,7 @@ func updateEnvFile(keyA, keyB string) error {
 
 	content = setOrAppend(content, "DEMO_TENANT_A_KEY", keyA)
 	content = setOrAppend(content, "DEMO_TENANT_B_KEY", keyB)
+	content = setOrAppend(content, "OPS_TOKEN", opsToken)
 
 	return os.WriteFile(envPath, []byte(content), 0600)
 }
@@ -79,11 +80,27 @@ func main() {
 
 	s := store.NewStore(pool)
 
-	// Generate key for shop-a
-	keyA, err := generateAPIKey()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating key for shop-a: %v\n", err)
-		os.Exit(1)
+	readEnvKey := func(varName string) string {
+		if val := os.Getenv(varName); val != "" {
+			return val
+		}
+		if envBytes, err := os.ReadFile(".env"); err == nil {
+			for _, line := range strings.Split(string(envBytes), "\n") {
+				if strings.HasPrefix(line, varName+"=") {
+					return strings.TrimSpace(strings.TrimPrefix(line, varName+"="))
+				}
+			}
+		}
+		return ""
+	}
+
+	keyA := readEnvKey("DEMO_TENANT_A_KEY")
+	if keyA == "" {
+		keyA, err = generateAPIKey()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating key for shop-a: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	hashA := auth.HashAPIKey(keyA)
 	tenantA, err := s.CreateTenant(ctx, "shop-a", hashA)
@@ -92,11 +109,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Generate key for shop-b
-	keyB, err := generateAPIKey()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating key for shop-b: %v\n", err)
-		os.Exit(1)
+	keyB := readEnvKey("DEMO_TENANT_B_KEY")
+	if keyB == "" {
+		keyB, err = generateAPIKey()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating key for shop-b: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	hashB := auth.HashAPIKey(keyB)
 	tenantB, err := s.CreateTenant(ctx, "shop-b", hashB)
@@ -105,8 +124,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	opsToken := readEnvKey("OPS_TOKEN")
+	if opsToken == "" {
+		opsToken, err = generateAPIKey()
+		if err != nil {
+			opsToken = "fake_ops_token_for_local_demo_only"
+		}
+	}
+
 	// Update git-ignored .env file with the generated plaintext keys
-	if err := updateEnvFile(keyA, keyB); err != nil {
+	if err := updateEnvFile(keyA, keyB, opsToken); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving keys to .env: %v\n", err)
 		os.Exit(1)
 	}

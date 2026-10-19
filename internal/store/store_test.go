@@ -193,3 +193,53 @@ func TestSteadfastCheckerRoRolePermissions(t *testing.T) {
 		t.Fatalf("Security failure: steadfast_checker_ro was able to SELECT tenants!")
 	}
 }
+
+
+func TestSteadfastDashboardRoRolePermissions(t *testing.T) {
+	_, _ = setupTestStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dashDBURL := "postgres://steadfast_dashboard_ro:fake_dashboard_ro_password@127.0.0.1:5432/steadfast?sslmode=disable"
+	dashPool, err := Connect(ctx, dashDBURL)
+	if err != nil {
+		t.Fatalf("Connect as steadfast_dashboard_ro failed: %v", err)
+	}
+	defer dashPool.Close()
+
+	// 1. SELECT on jobs, attempts, audit_log -> must SUCCEED
+	var cnt int
+	if err := dashPool.QueryRow(ctx, "SELECT count(*) FROM jobs").Scan(&cnt); err != nil {
+		t.Fatalf("steadfast_dashboard_ro should be able to SELECT jobs, failed: %v", err)
+	}
+	if err := dashPool.QueryRow(ctx, "SELECT count(*) FROM job_attempts").Scan(&cnt); err != nil {
+		t.Fatalf("steadfast_dashboard_ro should be able to SELECT job_attempts, failed: %v", err)
+	}
+	if err := dashPool.QueryRow(ctx, "SELECT count(*) FROM audit_log").Scan(&cnt); err != nil {
+		t.Fatalf("steadfast_dashboard_ro should be able to SELECT audit_log, failed: %v", err)
+	}
+
+	// 2. SELECT id, name FROM tenants -> must SUCCEED
+	if err := dashPool.QueryRow(ctx, "SELECT count(name) FROM tenants").Scan(&cnt); err != nil {
+		t.Fatalf("steadfast_dashboard_ro should be able to SELECT id, name from tenants, failed: %v", err)
+	}
+
+	// 3. SELECT api_key_hash FROM tenants -> MUST FAIL (permission denied for column)
+	var hash string
+	err = dashPool.QueryRow(ctx, "SELECT api_key_hash FROM tenants LIMIT 1").Scan(&hash)
+	if err == nil {
+		t.Fatalf("Security failure: steadfast_dashboard_ro was able to SELECT api_key_hash from tenants!")
+	}
+
+	// 4. INSERT into jobs -> MUST FAIL
+	_, err = dashPool.Exec(ctx, "INSERT INTO jobs (tenant_id, job_type, payload, payload_hash) VALUES ($1, 't', '{}', 'h')", uuid.New())
+	if err == nil {
+		t.Fatalf("Security failure: steadfast_dashboard_ro was able to INSERT into jobs!")
+	}
+
+	// 5. UPDATE on jobs -> MUST FAIL
+	_, err = dashPool.Exec(ctx, "UPDATE jobs SET state = 'DEAD'")
+	if err == nil {
+		t.Fatalf("Security failure: steadfast_dashboard_ro was able to UPDATE jobs!")
+	}
+}

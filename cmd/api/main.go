@@ -388,6 +388,35 @@ func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store, cfg *c
 			_ = json.NewEncoder(w).Encode(jobWithAttempts)
 		})))
 
+		// GET /v1/jobs/{id}/timeline (F15, Appendix K)
+		mux.Handle("GET /v1/jobs/{id}/timeline", tenantAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tenant, ok := auth.TenantFromContext(r.Context())
+			if !ok || tenant == nil {
+				auth.WriteJSONError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing authentication token")
+				return
+			}
+
+			idStr := r.PathValue("id")
+			jobID, err := uuid.Parse(idStr)
+			if err != nil {
+				auth.WriteJSONError(w, http.StatusNotFound, "not_found", "job not found")
+				return
+			}
+
+			timeline, err := s.GetJobTimeline(r.Context(), tenant.ID, jobID)
+			if err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					auth.WriteJSONError(w, http.StatusNotFound, "not_found", "job not found")
+					return
+				}
+				auth.WriteJSONError(w, http.StatusInternalServerError, "internal_error", "failed to retrieve job timeline")
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(timeline)
+		})))
+
 		// GET /v1/jobs
 		mux.Handle("GET /v1/jobs", tenantAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tenant, ok := auth.TenantFromContext(r.Context())
@@ -525,6 +554,7 @@ func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store, cfg *c
 					return
 				}
 				if errors.Is(err, store.ErrLeaseLost) {
+					_ = s.RecordStaleWriteRejected(r.Context(), tenant.ID, jobID, "heartbeat", "", req.FencingToken)
 					auth.WriteJSONError(w, http.StatusConflict, "lease_lost", "lease lost: token stale or job not leased")
 					return
 				}
@@ -575,6 +605,7 @@ func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store, cfg *c
 					return
 				}
 				if errors.Is(err, store.ErrStaleFencingToken) {
+					_ = s.RecordStaleWriteRejected(r.Context(), tenant.ID, jobID, "complete", "", req.FencingToken)
 					auth.WriteJSONError(w, http.StatusConflict, "stale_fencing_token", "stale fencing token or job not in LEASED state")
 					return
 				}
@@ -643,6 +674,7 @@ func SetupRouter(logger *slog.Logger, pool *pgxpool.Pool, s *store.Store, cfg *c
 					return
 				}
 				if errors.Is(err, store.ErrStaleFencingToken) {
+					_ = s.RecordStaleWriteRejected(r.Context(), tenant.ID, jobID, "fail", "", req.FencingToken)
 					auth.WriteJSONError(w, http.StatusConflict, "stale_fencing_token", "stale fencing token or job not in LEASED state")
 					return
 				}
@@ -834,7 +866,7 @@ func main() {
 	s := store.NewStore(pool)
 	router := SetupRouter(logger, pool, s, cfg)
 
-	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
+	addr := fmt.Sprintf(":%d", cfg.Port)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           router,

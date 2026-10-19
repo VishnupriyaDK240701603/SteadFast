@@ -52,7 +52,53 @@ To watch the live interactive visualizer during the run:
 
 ---
 
-## 3. Manual Operator Controls
+## 3. Pitch Timing & Beat Timestamps
+
+Measured reference timings on the test laptop (8 vCPUs, 8 GB RAM):
+
+### Short Profile (`short`, Target: ~90s)
+| Beat | Action | Start Time | End Time | Duration |
+|---|---|---|---|---|
+| **Beat 1** | Steady Load Submission (600 jobs @ 300 RPS) | `0:00` | `0:15` | 15s |
+| **Beat 2** | Worker SIGKILL & Database Restart (>= 500 in-flight) | `0:15` | `0:35` | 20s |
+| **Beat 3** | Downstream Fault Injection & DLQ Poison Replay | `0:35` | `0:55` | 20s |
+| **Beat 4** | Queue Drain & Independent Verifier Audit | `0:55` | `1:22` | 27s |
+| **Total** | Complete Short Demo Walkthrough | `0:00` | `1:22` | **~82 seconds** |
+
+### Full Profile (`full`, Target: ~4 min)
+| Beat | Action | Start Time | End Time | Duration |
+|---|---|---|---|---|
+| **Beat 1** | Extended Steady Load (1,200 jobs @ 400 RPS) | `0:00` | `0:45` | 45s |
+| **Beat 2** | Extended Worker Crash & Container Partition | `0:45` | `1:45` | 60s |
+| **Beat 3** | Sustained Ledger Outage, Breaker Trip & DLQ Replay | `1:45` | `2:45` | 60s |
+| **Beat 4** | Comprehensive Comparative Verifier Audit | `2:45` | `3:50` | 65s |
+| **Total** | Complete Comparative Demo Walkthrough | `0:00` | `3:50` | **~230 seconds (3m 50s)** |
+
+---
+
+## 4. Backup Video Recording Checklist (< 3 Minutes)
+
+Follow this checklist when recording the offline submission video:
+1. **Host Setup**:
+   - Pause Windows Update; set power mode to "Best Performance".
+   - Set screen resolution to 1080p (1920x1080) at 125% zoom.
+   - Close all background notifications and messaging applications.
+2. **Layout**:
+   - Left Half (50% screen): Browser displaying Dashboard at `http://127.0.0.1:8085`.
+   - Right Half (50% screen): Clean terminal window.
+3. **Execution**:
+   - Start OBS Studio screen recording (1080p, 60 FPS, H.264).
+   - In terminal, run: `go run ./cmd/ctl demo-short`
+   - Point out Beat 1 steady throughput ($0.00 stakes).
+   - Point out Beat 2 worker crash: show Baseline double-charging while Steadfast maintains $0.00 loss.
+   - Point out Beat 3 circuit breaker trip and open DLQ drawer to show poison job.
+   - Point out Beat 4 verifier output: "ALL INVARIANTS PASS".
+   - Stop recording. Verify duration is **under 2 minutes 30 seconds**.
+   - Save master recording to `docs/evidence/demo-backup-video.mp4`.
+
+---
+
+## 5. Manual Operator Controls
 
 During a live demo, the operator can manually trigger chaos actions:
 - Kill active worker: `curl -X POST http://127.0.0.1:8083/kill-worker -H "Authorization: Bearer $ADMIN_KEY"`

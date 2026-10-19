@@ -111,7 +111,9 @@ func (s *LedgerServer) Routes() http.Handler {
 	mux.HandleFunc("POST /charge", s.handleCharge)
 	mux.HandleFunc("GET /ledger/export", s.handleExport)
 	mux.HandleFunc("GET /ledger/stats", s.handleStats)
+	mux.HandleFunc("GET /ledger/entries", s.handleJobEntries)
 	mux.HandleFunc("POST /admin/fault", s.handleAdminFault)
+	mux.HandleFunc("POST /admin/reset", s.handleReset)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	return mux
 }
@@ -379,6 +381,82 @@ func (s *LedgerServer) handleAdminFault(w http.ResponseWriter, r *http.Request) 
 		"status": "fault_updated",
 		"mode":   req.Mode,
 	})
+}
+
+func (s *LedgerServer) handleJobEntries(w http.ResponseWriter, r *http.Request) {
+	authHeader := r.Header.Get("Authorization")
+	adminKeyHeader := r.Header.Get("X-Admin-Key")
+	key := adminKeyHeader
+	if key == "" && strings.HasPrefix(authHeader, "Bearer ") {
+		key = strings.TrimPrefix(authHeader, "Bearer ")
+	}
+	if s.adminKey != "" && key != s.adminKey {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]string{"code": "unauthorized", "message": "invalid admin key"},
+		})
+		return
+	}
+
+	jobID := r.URL.Query().Get("job_id")
+	if jobID == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]string{"code": "bad_request", "message": "job_id query param is required"},
+		})
+		return
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entries := make([]ExportEntry, 0)
+
+	rows, err := s.db.Query(`
+		SELECT order_id, customer_id, amount_cents, COALESCE(idempotency_key, ''), COALESCE(job_id, ''), COALESCE(fencing_token, 0), strftime('%Y-%m-%dT%H:%M:%SZ', created_at)
+		FROM charges WHERE job_id = ? ORDER BY id ASC
+	`, jobID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var e ExportEntry
+			e.EntryType = "applied"
+			if err := rows.Scan(&e.OrderID, &e.CustomerID, &e.AmountCents, &e.IdempotencyKey, &e.JobID, &e.FencingToken, &e.ReceivedAt); err == nil {
+				entries = append(entries, e)
+			}
+		}
+	}
+
+	sRows, err := s.db.Query(`
+		SELECT order_id, customer_id, amount_cents, COALESCE(idempotency_key, ''), COALESCE(job_id, ''), COALESCE(fencing_token, 0), strftime('%Y-%m-%dT%H:%M:%SZ', created_at)
+		FROM suppressed_entries WHERE job_id = ? ORDER BY id ASC
+	`, jobID)
+	if err == nil {
+		defer sRows.Close()
+		for sRows.Next() {
+			var e ExportEntry
+			e.EntryType = "suppressed"
+			if err := sRows.Scan(&e.OrderID, &e.CustomerID, &e.AmountCents, &e.IdempotencyKey, &e.JobID, &e.FencingToken, &e.ReceivedAt); err == nil {
+				entries = append(entries, e)
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"job_id":  jobID,
+		"entries": entries,
+	})
+}
+
+func (s *LedgerServer) handleReset(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, _ = s.db.Exec("DELETE FROM charges; DELETE FROM suppressed_entries;")
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
 }
 
 func (s *LedgerServer) handleHealthz(w http.ResponseWriter, r *http.Request) {

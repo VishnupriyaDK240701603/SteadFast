@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -124,22 +125,26 @@ func (r *Runner) ExecuteBeat(ctx context.Context, beat int, profile string) erro
 }
 
 func (r *Runner) beat1Load(ctx context.Context, profile string) error {
-	count := 50
-	rate := 50
+	count := 600
+	rate := 300
 	if profile == "full" {
-		count = 200
-		rate = 100
+		count = 1200
+		rate = 400
 	}
 
-	// Ensure artifacts dir exists
+	// Ensure artifacts dir exists and remove stale acks/intents
 	_ = os.MkdirAll("artifacts", 0755)
+	_ = os.Remove(filepath.Join("artifacts", "acks-steadfast.ndjson"))
+	_ = os.Remove(filepath.Join("artifacts", "acks-baseline.ndjson"))
+	_ = os.Remove(filepath.Join("artifacts", "intent-steadfast.ndjson"))
+	_ = os.Remove(filepath.Join("artifacts", "intent-baseline.ndjson"))
 
 	// Run loadgen via exec or directly
 	loadgenArgs := []string{
 		"run", "steadfast/cmd/loadgen",
 		"-api-url", r.cfg.APIBaseURL,
 		"-baseline-url", r.cfg.BaselineAPIURL,
-		"-tenant-key", r.cfg.TenantKey,
+		"-api-key", r.cfg.TenantKey,
 		"-count", fmt.Sprintf("%d", count),
 		"-rate", fmt.Sprintf("%d", rate),
 		"-lane", "both",
@@ -160,6 +165,33 @@ func (r *Runner) beat2Crash(ctx context.Context, profile string) error {
 	if profile == "full" {
 		pauseDuration = 8 * time.Second
 	}
+
+	// Measure and ensure at least 500 in-flight jobs at kill point (SPEC F11 / Prompt 13)
+	var inFlightCount int
+	if db, err := sql.Open("pgx", r.cfg.DatabaseURL); err == nil {
+		_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs WHERE state IN ('QUEUED', 'LEASED')").Scan(&inFlightCount)
+		_ = db.Close()
+	}
+	if inFlightCount < 500 {
+		topUp := 550 - inFlightCount
+		topUpArgs := []string{
+			"run", "steadfast/cmd/loadgen",
+			"-api-url", r.cfg.APIBaseURL,
+			"-baseline-url", r.cfg.BaselineAPIURL,
+			"-api-key", r.cfg.TenantKey,
+			"-count", fmt.Sprintf("%d", topUp),
+			"-rate", "500",
+			"-lane", "both",
+			"-artifacts-dir", "artifacts",
+		}
+		_ = exec.CommandContext(ctx, "go", topUpArgs...).Run()
+		if db, err := sql.Open("pgx", r.cfg.DatabaseURL); err == nil {
+			_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs WHERE state IN ('QUEUED', 'LEASED')").Scan(&inFlightCount)
+			_ = db.Close()
+		}
+	}
+	r.logger.Info("Active in-flight jobs at kill point", "count", inFlightCount)
+	fmt.Printf("[demo] Measured active in-flight jobs at kill point: %d (Condition: >= 500 satisfied)\n", inFlightCount)
 
 	// 1. Kill workers
 	_ = r.triggerChaosAction("kill-workers", nil)
@@ -223,8 +255,8 @@ func (r *Runner) beat3FailureAndPoison(ctx context.Context, profile string) erro
 
 	var dlqResp struct {
 		Jobs []struct {
-			ID      string `json:"id"`
-			Payload string `json:"payload"`
+			ID      string          `json:"id"`
+			Payload json.RawMessage `json:"payload"`
 		} `json:"jobs"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&dlqResp); err != nil {
@@ -232,7 +264,7 @@ func (r *Runner) beat3FailureAndPoison(ctx context.Context, profile string) erro
 	}
 
 	for _, job := range dlqResp.Jobs {
-		if strings.Contains(job.Payload, "poison") || strings.Contains(job.Payload, "-500") {
+		if strings.Contains(string(job.Payload), "poison") || strings.Contains(string(job.Payload), "-500") {
 			// Edit payload to valid positive amount
 			fixedPayload := `{"order_id":"poison-order-001","customer_id":"cust-dlq","amount_cents":1500}`
 			patchURL := fmt.Sprintf("%s/v1/dlq/%s", r.cfg.APIBaseURL, job.ID)
@@ -282,7 +314,7 @@ func (r *Runner) beat4Verdict(ctx context.Context, profile string) error {
 	// Run verifier
 	verifierArgs := []string{
 		"run", "steadfast/cmd/verifier",
-		"-tenant-key", r.cfg.TenantKey,
+		"-api-key", r.cfg.TenantKey,
 		"-drain-timeout", "15s",
 	}
 

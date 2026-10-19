@@ -41,7 +41,7 @@ func TestCtlUsage(t *testing.T) {
 
 func TestCtlUnimplementedSubcommand(t *testing.T) {
 	bin := buildCtlBinary(t)
-	subcommands := []string{"rehearse"}
+	subcommands := []string{"unimplemented-foo"}
 	for _, sub := range subcommands {
 		cmd := exec.Command(bin, sub)
 		out, err := cmd.CombinedOutput()

@@ -15,9 +15,9 @@
     }
   },
   "benchmark": {
-    "submission_latency_p50_ms": 6.65,
-    "submission_latency_p99_ms": 12.2,
-    "sustained_throughput_rps": 84,
+    "submission_latency_p50_ms": 7.46,
+    "submission_latency_p99_ms": 17.58,
+    "sustained_throughput_rps": 84.4,
     "duration_seconds": 3.1,
     "worker_count": 4,
     "worker_concurrency_per_process": 4,
@@ -27,5 +27,5 @@
     "worker_crash_recovery_time_seconds": 1.25,
     "postgres_restart_recovery_time_seconds": 2.68
   },
-  "timestamp": "2026-10-19T02:28:43Z"
+  "timestamp": "2026-10-19T05:17:07Z"
 }

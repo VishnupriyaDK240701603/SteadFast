@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="720" viewBox="0 0 1200 720" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#090d16"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="720" fill="url(#bgGrad)"/>
+
+  <!-- Header Strip -->
+  <rect x="0" y="0" width="1200" height="64" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+  <text x="32" y="38" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="18" font-weight="800" letter-spacing="-0.5">STEADFAST DEMO DASHBOARD</text>
+  <rect x="290" y="22" width="110" height="22" rx="11" fill="#064e3b" stroke="#10b981" stroke-width="1"/>
+  <text x="345" y="37" fill="#6ee7b7" font-family="monospace" font-size="11" font-weight="700" text-anchor="middle">LIVE (SSE)</text>
+
+  <rect x="940" y="18" width="228" height="30" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+  <text x="1054" y="38" fill="#10b981" font-family="monospace" font-size="12" font-weight="700" text-anchor="middle">VERDICT: PASS (I1-I4)</text>
+
+  <!-- Columns: Steadfast (Left) vs Baseline (Right) -->
+  <!-- Left Column: Steadfast -->
+  <rect x="32" y="84" width="556" height="520" rx="10" fill="#111827" stroke="#10b981" stroke-width="1.5" filter="url(#cardShadow)"/>
+  <text x="56" y="118" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="16" font-weight="700">Steadfast (Postgres Fenced + Advisory Reaper)</text>
+  <rect x="470" y="102" width="94" height="22" rx="4" fill="#064e3b"/>
+  <text x="517" y="117" fill="#6ee7b7" font-family="monospace" font-size="11" font-weight="700" text-anchor="middle">84.0 jobs/s</text>
+
+  <!-- Stakes Box Steadfast -->
+  <rect x="56" y="140" width="508" height="80" rx="8" fill="#064e3b" fill-opacity="0.25" stroke="#10b981" stroke-width="1"/>
+  <text x="80" y="172" fill="#6ee7b7" font-family="system-ui, sans-serif" font-size="13" font-weight="600">CUSTOMER STAKES</text>
+  <text x="80" y="202" fill="#f8fafc" font-family="monospace" font-size="20" font-weight="800">LOST: $0.00 (0 jobs)  |  DOUBLE-CHARGED: $0.00 (0 jobs)</text>
+
+  <!-- Throughput Canvas Mock -->
+  <rect x="56" y="236" width="508" height="180" rx="6" fill="#030712" stroke="#1f2937" stroke-width="1"/>
+  <text x="80" y="264" fill="#94a3b8" font-family="monospace" font-size="11">Throughput Rate (jobs/s)</text>
+  <path d="M 70 360 L 150 310 L 220 312 L 270 380 L 320 380 L 350 290 L 450 305 L 540 305" fill="none" stroke="#10b981" stroke-width="2.5"/>
+
+  <!-- Circuit Breaker & DLQ Row -->
+  <rect x="56" y="432" width="246" height="80" rx="6" fill="#1f2937"/>
+  <text x="76" y="458" fill="#94a3b8" font-family="sans-serif" font-size="11" font-weight="600">CIRCUIT BREAKER</text>
+  <text x="76" y="490" fill="#10b981" font-family="monospace" font-size="16" font-weight="800">CLOSED (Healthy)</text>
+
+  <rect x="318" y="432" width="246" height="80" rx="6" fill="#1f2937"/>
+  <text x="338" y="458" fill="#94a3b8" font-family="sans-serif" font-size="11" font-weight="600">DEAD LETTER QUEUE</text>
+  <text x="338" y="490" fill="#38bdf8" font-family="monospace" font-size="16" font-weight="800">1 Replayed (0 Dead)</text>
+
+  <!-- Invariants Summary -->
+  <text x="56" y="546" fill="#10b981" font-family="monospace" font-size="12" font-weight="700">✓ I1 Zero Lost  ✓ I2 Non-Duplicated  ✓ I3 Integrity  ✓ I4 Fencing Monotonic</text>
+
+  <!-- Right Column: Baseline (Redis) -->
+  <rect x="612" y="84" width="556" height="520" rx="10" fill="#111827" stroke="#f43f5e" stroke-width="1.5" filter="url(#cardShadow)"/>
+  <text x="636" y="118" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="16" font-weight="700">Baseline (Redis Celery-Style Visibility Timeout)</text>
+  <rect x="1050" y="102" width="94" height="22" rx="4" fill="#881337"/>
+  <text x="1097" y="117" fill="#fca5a5" font-family="monospace" font-size="11" font-weight="700" text-anchor="middle">160.0 jobs/s</text>
+
+  <!-- Stakes Box Baseline -->
+  <rect x="636" y="140" width="508" height="80" rx="8" fill="#881337" fill-opacity="0.3" stroke="#f43f5e" stroke-width="1"/>
+  <text x="660" y="172" fill="#fda4af" font-family="system-ui, sans-serif" font-size="13" font-weight="600">CUSTOMER STAKES</text>
+  <text x="660" y="202" fill="#f43f5e" font-family="monospace" font-size="20" font-weight="800">LOST: $450.00  |  DOUBLE-CHARGED: $1,250.00 (CRASH)</text>
+
+  <!-- Throughput Canvas Mock Baseline -->
+  <rect x="636" y="236" width="508" height="180" rx="6" fill="#030712" stroke="#1f2937" stroke-width="1"/>
+  <text x="660" y="264" fill="#94a3b8" font-family="monospace" font-size="11">Throughput Rate (jobs/s)</text>
+  <path d="M 650 310 L 730 310 L 800 350 L 850 310 L 930 310 L 1050 310 L 1120 310" fill="none" stroke="#f43f5e" stroke-width="2.5"/>
+
+  <!-- Baseline Failure Box -->
+  <rect x="636" y="432" width="508" height="80" rx="6" fill="#1f2937"/>
+  <text x="660" y="458" fill="#f43f5e" font-family="sans-serif" font-size="11" font-weight="600">INVARIANT EVALUATION</text>
+  <text x="660" y="490" fill="#f43f5e" font-family="monospace" font-size="16" font-weight="800">VERDICT: FAILED (Double-Charges and Lost Jobs Detected)</text>
+
+  <text x="636" y="546" fill="#f43f5e" font-family="monospace" font-size="12" font-weight="700">✗ I1 Lost Acks Detected  ✗ I2 Duplicate Charges Detected</text>
+
+  <!-- Bottom Strip -->
+  <rect x="32" y="624" width="1136" height="64" rx="8" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+  <text x="60" y="662" fill="#94a3b8" font-family="sans-serif" font-size="13">Independent Verifier Audit: Audited 550 committed PostgreSQL jobs, 550 unique SQLite ledger charges, and local ack log.</text>
+  <text x="1080" y="662" fill="#10b981" font-family="monospace" font-size="14" font-weight="700" text-anchor="end">100% REPEATABLE PASS</text>
+</svg>

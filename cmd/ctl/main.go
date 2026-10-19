@@ -116,12 +116,19 @@ func main() {
 			os.Exit(1)
 		}
 	case "rehearse":
-		fmt.Fprintf(os.Stderr, "subcommand \"%s\" is not implemented yet\n", cmd)
-		os.Exit(2)
+		if err := runRehearse(args); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "screenshot":
+		if err := runScreenshot(args); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", cmd)
+		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s (is not implemented yet)\n\n", cmd)
 		printUsage()
 		os.Exit(1)
 	}
@@ -843,11 +850,16 @@ func runDemoCmd(cmdName string, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Ensure clean state before demo run
+	_ = execCmd("docker", "exec", "-i", "steadfast-postgres", "psql", "-U", "steadfast_user", "-d", "steadfast", "-c", "TRUNCATE jobs, job_attempts, idempotency_keys, audit_log CASCADE;")
+	_ = execCmd("docker", "exec", "-i", "steadfast-redis", "redis-cli", "FLUSHALL")
+	if resp, err := http.Post("http://127.0.0.1:8082/admin/reset", "application/json", nil); err == nil {
+		_ = resp.Body.Close()
+	}
+	_ = runSeed(nil)
+
 	tenantKey := getTenantKey()
 	adminKey := os.Getenv("ADMIN_KEY")
-
-	// Ensure seed has run so tenants and poison job exist
-	_ = runSeed(nil)
 
 	runnerCfg := demo.RunnerConfig{
 		APIBaseURL:     "http://127.0.0.1:8080",
