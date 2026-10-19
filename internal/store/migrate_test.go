@@ -42,17 +42,21 @@ func TestSequentialMigrations(t *testing.T) {
 		t.Fatalf("Expected migration 1 to be applied, got %+v", statuses)
 	}
 
-	// 2. Migrate Down
-	if err := MigrateDown(ctx, pool, migrationsDir); err != nil {
-		t.Fatalf("MigrateDown failed: %v", err)
+	// 2. Migrate Down all applied migrations
+	for i := len(statuses); i > 0; i-- {
+		if err := MigrateDown(ctx, pool, migrationsDir); err != nil {
+			t.Fatalf("MigrateDown step %d failed: %v", i, err)
+		}
 	}
 
 	statusesDown, err := GetMigrationStatus(ctx, pool, migrationsDir)
 	if err != nil {
 		t.Fatalf("GetMigrationStatus after down failed: %v", err)
 	}
-	if len(statusesDown) > 0 && statusesDown[0].Applied {
-		t.Fatalf("Expected migration 1 to be unapplied after down, got %+v", statusesDown)
+	for _, s := range statusesDown {
+		if s.Applied {
+			t.Fatalf("Expected all migrations to be unapplied after down, got %+v", statusesDown)
+		}
 	}
 
 	// 3. Migrate Up again (re-application)

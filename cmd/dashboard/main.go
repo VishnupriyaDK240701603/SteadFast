@@ -317,6 +317,11 @@ func (s *Server) collectSnapshot(ctx context.Context) DashboardSnapshot {
 			_ = db.QueryRowContext(ctxTimeout, "SELECT COUNT(*) FROM jobs WHERE state = 'SUCCEEDED'").Scan(&snap.Steadfast.Succeeded)
 			_ = db.QueryRowContext(ctxTimeout, "SELECT COUNT(*) FROM jobs WHERE state = 'DEAD'").Scan(&snap.Steadfast.DeadCount)
 
+			_ = db.QueryRowContext(ctxTimeout, "SELECT state FROM circuit_breakers ORDER BY updated_at DESC LIMIT 1").Scan(&snap.Steadfast.BreakerState)
+			if snap.Steadfast.BreakerState == "" {
+				snap.Steadfast.BreakerState = "CLOSED"
+			}
+
 			_ = db.QueryRowContext(ctxTimeout, `
 				SELECT COUNT(DISTINCT worker_id) FROM job_attempts 
 				WHERE started_at > now() - interval '30 seconds'

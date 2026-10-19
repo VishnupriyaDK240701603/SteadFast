@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"steadfast/internal/breaker"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -114,10 +115,11 @@ type AuditEntry struct {
 
 type Store struct {
 	Pool *pgxpool.Pool
+	Breaker *breaker.Breaker
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
-	return &Store{Pool: pool}
+	return &Store{Pool: pool, Breaker: breaker.New(breaker.DefaultConfig())}
 }
 
 func Connect(ctx context.Context, connString string) (*pgxpool.Pool, error) {
@@ -549,6 +551,42 @@ func (s *Store) ClaimJobs(ctx context.Context, tenantID uuid.UUID, workerID stri
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	excludedTypes := []string{}
+	exRows, err := tx.Query(ctx, `
+		SELECT job_type FROM circuit_breakers
+		WHERE tenant_id = $1 AND (
+			(state = 'OPEN' AND now() < opened_at + (cooldown_seconds * interval '1 second'))
+			OR probe_in_flight = true
+		);
+	`, tenantID)
+	if err == nil {
+		for exRows.Next() {
+			var jt string
+			if err := exRows.Scan(&jt); err == nil {
+				excludedTypes = append(excludedTypes, jt)
+			}
+		}
+		exRows.Close()
+	}
+
+	probeTypes := map[string]bool{}
+	prRows, err := tx.Query(ctx, `
+		SELECT job_type FROM circuit_breakers
+		WHERE tenant_id = $1 AND (
+			(state = 'OPEN' AND now() >= opened_at + (cooldown_seconds * interval '1 second') AND NOT probe_in_flight)
+			OR (state = 'HALF_OPEN' AND NOT probe_in_flight)
+		);
+	`, tenantID)
+	if err == nil {
+		for prRows.Next() {
+			var jt string
+			if err := prRows.Scan(&jt); err == nil {
+				probeTypes[jt] = true
+			}
+		}
+		prRows.Close()
+	}
+
 	query := `
 	WITH picked AS (
 		SELECT id FROM jobs
@@ -556,6 +594,7 @@ func (s *Store) ClaimJobs(ctx context.Context, tenantID uuid.UUID, workerID stri
 		  AND state = 'QUEUED'
 		  AND run_at <= now()
 		  AND (cardinality($2::text[]) = 0 OR job_type = ANY($2))
+		  AND (cardinality($6::text[]) = 0 OR NOT (job_type = ANY($6)))
 		ORDER BY priority ASC, run_at ASC, id ASC
 		LIMIT $3
 		FOR UPDATE SKIP LOCKED
@@ -576,7 +615,7 @@ func (s *Store) ClaimJobs(ctx context.Context, tenantID uuid.UUID, workerID stri
 	)
 	SELECT id, job_type, payload, fencing_token, attempts, max_attempts FROM claimed;`
 
-	rows, err := tx.Query(ctx, query, tenantID, types, maxBatch, workerID, leaseMillis)
+	rows, err := tx.Query(ctx, query, tenantID, types, maxBatch, workerID, leaseMillis, excludedTypes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim jobs: %w", err)
 	}
@@ -595,6 +634,45 @@ func (s *Store) ClaimJobs(ctx context.Context, tenantID uuid.UUID, workerID stri
 		}
 		c.LeaseSeconds = leaseSeconds
 		claimedList = append(claimedList, c)
+	}
+
+	// If any claimed job is of a probe type, mark breaker as HALF_OPEN with probe_in_flight = true
+	// and if multiple jobs of that probe type were claimed, return only 1 probe job and revert others
+	if len(probeTypes) > 0 {
+		filteredList := []ClaimedJob{}
+		probedMap := map[string]bool{}
+
+		for _, c := range claimedList {
+			if probeTypes[c.Type] {
+				if !probedMap[c.Type] {
+					probedMap[c.Type] = true
+					filteredList = append(filteredList, c)
+					_, _ = tx.Exec(ctx, `
+						UPDATE circuit_breakers SET
+							state = 'HALF_OPEN',
+							probe_in_flight = true,
+							updated_at = now()
+						WHERE tenant_id = $1 AND job_type = $2;
+					`, tenantID, c.Type)
+				} else {
+					// Revert extra probe jobs back to QUEUED
+					_, _ = tx.Exec(ctx, `
+						UPDATE jobs SET
+							state = 'QUEUED',
+							worker_id = NULL,
+							lease_expires_at = NULL,
+							fencing_token = fencing_token - 1,
+							attempts = attempts - 1,
+							updated_at = now()
+						WHERE id = $1;
+					`, c.ID)
+					_, _ = tx.Exec(ctx, `DELETE FROM job_attempts WHERE job_id = $1 AND attempt_no = $2;`, c.ID, c.Attempt)
+				}
+			} else {
+				filteredList = append(filteredList, c)
+			}
+		}
+		claimedList = filteredList
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -691,6 +769,15 @@ func (s *Store) CompleteJob(ctx context.Context, tenantID, jobID uuid.UUID, fenc
 		return fmt.Errorf("failed to close job attempt: %w", err)
 	}
 
+	// Breaker record completion
+	if s.Breaker != nil {
+		var jobType string
+		_ = tx.QueryRow(ctx, "SELECT job_type FROM jobs WHERE id = $1", jobID).Scan(&jobType)
+		if jobType != "" {
+			_ = s.Breaker.RecordCompletion(ctx, tx, tenantID, jobType)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit complete transaction: %w", err)
 	}
@@ -712,13 +799,14 @@ func (s *Store) FailJob(ctx context.Context, tenantID, jobID uuid.UUID, fencingT
 	var attempts int
 	var maxAttempts int
 
+	var jobType string
 	checkQuery := `
-	SELECT state, fencing_token, attempts, max_attempts
+	SELECT state, fencing_token, attempts, max_attempts, job_type
 	FROM jobs
 	WHERE id = $1 AND tenant_id = $2
 	FOR UPDATE;`
 
-	err = tx.QueryRow(ctx, checkQuery, jobID, tenantID).Scan(&state, &currentToken, &attempts, &maxAttempts)
+	err = tx.QueryRow(ctx, checkQuery, jobID, tenantID).Scan(&state, &currentToken, &attempts, &maxAttempts, &jobType)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil, ErrNotFound
@@ -769,6 +857,10 @@ func (s *Store) FailJob(ctx context.Context, tenantID, jobID uuid.UUID, fencingT
 
 		if _, err := tx.Exec(ctx, attemptQuery, jobID, fencingToken, errorClass, message, disableFencing); err != nil {
 			return "", nil, fmt.Errorf("failed to update attempt row: %w", err)
+		}
+
+		if s.Breaker != nil && jobType != "" {
+			_ = s.Breaker.RecordFailure(ctx, tx, tenantID, jobType, errorClass, retryable)
 		}
 
 		if err := tx.Commit(ctx); err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"io"
 	"log/slog"
 	"math/rand"
@@ -246,6 +247,11 @@ func processJob(parentCtx context.Context, cfg Config, job *Job) {
 		errClass := "handler_error"
 		if !retryable {
 			errClass = "permanent_error"
+		} else if strings.Contains(strings.ToLower(handlerErr.Error()), "downstream") ||
+			strings.Contains(strings.ToLower(handlerErr.Error()), "unavailable") ||
+			strings.Contains(strings.ToLower(handlerErr.Error()), "5xx") ||
+			strings.Contains(strings.ToLower(handlerErr.Error()), "network error") {
+			errClass = "downstream_unavailable"
 		}
 		if err := reportJobFailure(parentCtx, cfg, job.ID, job.FencingToken, errClass, handlerErr.Error(), retryable); err != nil {
 			cfg.Logger.Warn("failed to report failure", "job_id", job.ID, "error", err)
