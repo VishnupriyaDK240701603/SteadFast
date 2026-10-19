@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Timeline Detail</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body {
+      background: #090d16;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    .detail-header {
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      padding: 16px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .back-btn {
+      color: #38bdf8;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .detail-container {
+      max-width: 1100px;
+      margin: 28px auto;
+      padding: 0 20px;
+    }
+    .meta-card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .meta-item { font-size: 13px; }
+    .meta-item span { display: block; font-size: 11px; text-transform: uppercase; color: #94a3b8; font-weight: 600; margin-bottom: 4px; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      font-family: monospace;
+    }
+    .badge-QUEUED { background: #713f12; color: #fef08a; }
+    .badge-LEASED { background: #0c4a6e; color: #bae6fd; }
+    .badge-SUCCEEDED { background: #064e3b; color: #a7f3d0; }
+    .badge-DEAD { background: #881337; color: #fecdd3; }
+    .chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: monospace;
+    }
+    .chip-succeeded { background: #064e3b; color: #6ee7b7; border: 1px solid #10b981; }
+    .chip-lease_expired { background: #78350f; color: #fde68a; border: 1px solid #d97706; }
+    .chip-failed_permanent { background: #881337; color: #fca5a5; border: 1px solid #ef4444; }
+    .chip-failed_retryable { background: #7c2d12; color: #fed7aa; border: 1px solid #f97316; }
+
+    .timeline-section {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .section-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-top: 0;
+      margin-bottom: 20px;
+    }
+    .attempt-band {
+      background: #111827;
+      border-left: 4px solid #38bdf8;
+      border-radius: 6px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+    .attempt-band.lease_expired {
+      border-left-color: #d97706;
+      background: rgba(217, 119, 6, 0.05);
+    }
+    .attempt-band.succeeded {
+      border-left-color: #10b981;
+      background: rgba(16, 185, 129, 0.05);
+    }
+    .attempt-band.failed_permanent {
+      border-left-color: #ef4444;
+      background: rgba(239, 68, 68, 0.05);
+    }
+    .attempt-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .attempt-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+    .attempt-meta {
+      font-size: 12px;
+      color: #94a3b8;
+      font-family: monospace;
+      display: flex;
+      gap: 20px;
+    }
+    .event-stream {
+      border-left: 2px solid #334155;
+      margin-left: 12px;
+      padding-left: 24px;
+      margin-top: 20px;
+    }
+    .event-node {
+      position: relative;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    .event-node::before {
+      content: '';
+      position: absolute;
+      left: -29px;
+      top: 4px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #38bdf8;
+    }
+    .event-node.stale::before {
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444;
+    }
+    .event-time { font-size: 11px; color: #94a3b8; font-family: monospace; }
+    .event-tag {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: monospace;
+      margin-left: 8px;
+    }
+    .event-tag.stale { background: #881337; color: #fca5a5; border: 1px solid #ef4444; }
+
+    .ledger-evidence-card {
+      background: #0f172a;
+      border: 1px solid #0284c7;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    .ledger-header {
+      background: #0369a1;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .ledger-title {
+      font-weight: 700;
+      font-size: 13px;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+    th { background: #0b1120; color: #94a3b8; padding: 10px 16px; font-weight: 600; text-transform: uppercase; }
+    td { padding: 12px 16px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+  
+    /* 6-Stage Lifecycle Pipeline CSS */
+    .jury-pipeline-card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    .jury-pipeline-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .jury-tag {
+      background: #0284c7;
+      color: #fff;
+      font-weight: 800;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .pipeline-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 12px;
+      position: relative;
+    }
+    @media (max-width: 1024px) {
+      .pipeline-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .step-box {
+      background: #090d16;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 14px 12px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      transition: all 0.2s;
+    }
+    .step-box.state-active {
+      border-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.05);
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
+    }
+    .step-box.state-success {
+      border-color: #10b981;
+      background: rgba(16, 185, 129, 0.06);
+    }
+    .step-box.state-warn {
+      border-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.08);
+    }
+    .step-box.state-danger {
+      border-color: #ef4444;
+      background: rgba(239, 68, 68, 0.08);
+    }
+    .step-badge-num {
+      display: inline-block;
+      width: 22px;
+      height: 22px;
+      line-height: 22px;
+      text-align: center;
+      background: #1e293b;
+      color: #cbd5e1;
+      font-weight: 700;
+      font-size: 11px;
+      border-radius: 50%;
+      margin-bottom: 8px;
+    }
+    .step-box.state-success .step-badge-num { background: #065f46; color: #6ee7b7; }
+    .step-box.state-warn .step-badge-num { background: #78350f; color: #fde68a; }
+    .step-box.state-danger .step-badge-num { background: #881337; color: #fca5a5; }
+    .step-name {
+      font-weight: 700;
+      font-size: 12px;
+      color: #f8fafc;
+      margin-bottom: 4px;
+    }
+    .step-desc {
+      font-size: 11px;
+      color: #94a3b8;
+      line-height: 1.4;
+      margin-bottom: 10px;
+      flex-grow: 1;
+    }
+    .step-status {
+      font-size: 10px;
+      font-family: monospace;
+      padding: 4px 6px;
+      border-radius: 4px;
+      background: #020617;
+      border: 1px solid #1e293b;
+      color: #cbd5e1;
+      word-break: break-all;
+    }
+
+  </style>
+</head>
+<body>
+  <header class="detail-header">
+    <a href="/ops" class="back-btn">&larr; Back to Operations Console</a>
+    <span class="badge" style="background:#1e293b; color:#94a3b8;">TIMELINE VIEW (F15)</span>
+  </header>
+
+  <div class="detail-container">
+    <div class="meta-card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+          <h2 id="job-id-title" style="margin:0; font-family:monospace; font-size:18px; color:#38bdf8;">Loading Job...</h2>
+          <div id="job-type-sub" style="color:#94a3b8; font-size:13px; margin-top:4px;">Type: -</div>
+        </div>
+        <div id="job-state-badge"></div>
+      </div>
+      <div class="meta-grid">
+        <div class="meta-item"><span>Created At</span><div id="job-created" style="font-family:monospace;">-</div></div>
+        <div class="meta-item"><span>Finished At</span><div id="job-finished" style="font-family:monospace;">-</div></div>
+        <div class="meta-item"><span>Total Attempts</span><div id="job-attempts-count" style="font-weight:700;">-</div></div>
+      </div>
+      <div style="margin-top:16px;">
+        <span style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600; display:block; margin-bottom:6px;">Payload (Max 2 KiB escaped)</span>
+        <pre id="job-payload-box" style="background:#020617; border:1px solid #334155; border-radius:6px; padding:12px; font-size:12px; color:#e2e8f0; max-height:160px; overflow:auto; margin:0;"></pre>
+      </div>
+    </div>
+
+    <!-- 6-Stage Core Lifecycle Architecture Pipeline for Jury -->
+    <div class="jury-pipeline-card">
+      <div class="jury-pipeline-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span class="jury-tag">Core Architecture Lifecycle</span>
+          <span style="font-size:13px; font-weight:700; color:#38bdf8;">End-to-End Fault Tolerance Pipeline</span>
+        </div>
+        <span style="font-size:12px; color:#94a3b8;">Demonstrates Engine Laws: Mutual Exclusion, Fencing, and Automatic Recovery</span>
+      </div>
+
+      <div class="pipeline-grid">
+        <!-- Step 1 -->
+        <div class="step-box" id="pipe-step-1">
+          <div class="step-badge-num">1</div>
+          <div class="step-name">Claim &amp; Lease</div>
+          <div class="step-desc">Worker claims job atomically using Postgres <code>SKIP LOCKED</code>.</div>
+          <div class="step-status" id="pipe-status-1">Waiting...</div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="step-box" id="pipe-step-2">
+          <div class="step-badge-num">2</div>
+          <div class="step-name">Fencing Token</div>
+          <div class="step-desc">Monotonically increasing token assigned to strictly fence zombie workers.</div>
+          <div class="step-status" id="pipe-status-2">Waiting...</div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="step-box" id="pipe-step-3">
+          <div class="step-badge-num">3</div>
+          <div class="step-name">Heartbeat Renewal</div>
+          <div class="step-desc">Worker reports continued ownership, advancing the lease deadline.</div>
+          <div class="step-status" id="pipe-status-3">Waiting...</div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="step-box" id="pipe-step-4">
+          <div class="step-badge-num">4</div>
+          <div class="step-name">Crash / Expiry</div>
+          <div class="step-desc">Worker crashes, stalls, or network breaks, halting heartbeats.</div>
+          <div class="step-status" id="pipe-status-4">Waiting...</div>
+        </div>
+
+        <!-- Step 5 -->
+        <div class="step-box" id="pipe-step-5">
+          <div class="step-badge-num">5</div>
+          <div class="step-name">Reaper Recovery</div>
+          <div class="step-desc">Reaper detects expired lease, fences zombie, re-enqueues job.</div>
+          <div class="step-status" id="pipe-status-5">Waiting...</div>
+        </div>
+
+        <!-- Step 6 -->
+        <div class="step-box" id="pipe-step-6">
+          <div class="step-badge-num">6</div>
+          <div class="step-name">Terminal Outcome</div>
+          <div class="step-desc">Retry with backoff succeeds &amp; commits ledger, or moves to DLQ.</div>
+          <div class="step-status" id="pipe-status-6">Waiting...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vertical Attempts Timeline -->
+    <div class="timeline-section">
+      <h3 class="section-title">Execution Attempts & Fencing Progression</h3>
+      <div id="attempts-container">
+        <div style="color:#94a3b8; font-size:13px;">Loading attempts...</div>
+      </div>
+    </div>
+
+    <!-- Downstream Evidence Panel -->
+    <div class="ledger-evidence-card">
+      <div class="ledger-header">
+        <span class="ledger-title">Downstream Evidence (Independent of Steadfast)</span>
+        <span style="font-size:11px; color:#bae6fd; font-family:monospace;">SQLite /data/ledger.db</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Entry Type</th>
+            <th>Order ID</th>
+            <th>Amount ($)</th>
+            <th>Fencing Token</th>
+            <th>Recorded At</th>
+          </tr>
+        </thead>
+        <tbody id="ledger-evidence-body">
+          <tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:20px;">Querying downstream ledger evidence...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Audit Log History -->
+    <div class="timeline-section">
+      <h3 class="section-title">Audit Log Event Stream</h3>
+      <div id="events-stream" class="event-stream">
+        <div style="color:#94a3b8; font-size:13px;">Loading audit stream...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const pathParts = window.location.pathname.split('/');
+    const jobId = pathParts[pathParts.length - 1];
+
+    
+    function updateLifecyclePipeline(job, timeline) {
+      const attempts = timeline.attempts || [];
+      const events = timeline.events || [];
+      const firstAtt = attempts[0] || {};
+
+      // 1. Claim & Lease
+      const s1 = document.getElementById('pipe-step-1');
+      const st1 = document.getElementById('pipe-status-1');
+      if (firstAtt.worker_id) {
+        s1.className = 'step-box state-success';
+        st1.innerHTML = `Claimed: <strong>${escapeHtml(firstAtt.worker_id)}</strong>`;
+      } else if (job.state === 'QUEUED') {
+        s1.className = 'step-box state-active';
+        st1.textContent = 'Enqueued, awaiting worker';
+      } else {
+        s1.className = 'step-box state-success';
+        st1.textContent = 'Claimed under lease';
+      }
+
+      // 2. Fencing Token
+      const s2 = document.getElementById('pipe-step-2');
+      const st2 = document.getElementById('pipe-status-2');
+      if (job.fencing_token > 0) {
+        s2.className = 'step-box state-success';
+        st2.innerHTML = `Token: <strong>#${job.fencing_token}</strong>`;
+      } else {
+        s2.className = 'step-box';
+        st2.textContent = 'Pending lease assignment';
+      }
+
+      // 3. Heartbeat Renewal
+      const s3 = document.getElementById('pipe-step-3');
+      const st3 = document.getElementById('pipe-status-3');
+      if (job.state === 'LEASED') {
+        s3.className = 'step-box state-active';
+        st3.innerHTML = '💓 Active Heartbeats';
+      } else if (attempts.length > 0) {
+        s3.className = 'step-box state-success';
+        st3.textContent = 'Lease held during execution';
+      } else {
+        s3.className = 'step-box';
+        st3.textContent = 'Inactive';
+      }
+
+      // 4. Crash / Expiry
+      const s4 = document.getElementById('pipe-step-4');
+      const st4 = document.getElementById('pipe-status-4');
+      const hasExpiredAttempt = attempts.some(a => a.outcome === 'lease_expired' || (a.error_message || '').includes('expired'));
+      const hasFailedAttempt = attempts.some(a => a.outcome === 'failed_retryable' || a.outcome === 'failed_permanent');
+      if (hasExpiredAttempt) {
+        s4.className = 'step-box state-danger';
+        st4.innerHTML = '⚠️ Worker crashed / lease expired';
+      } else if (hasFailedAttempt) {
+        s4.className = 'step-box state-warn';
+        st4.innerHTML = '⚠️ Transient failure occurred';
+      } else if (job.state === 'SUCCEEDED') {
+        s4.className = 'step-box state-success';
+        st4.textContent = 'No crashes (Clean run)';
+      } else {
+        s4.className = 'step-box';
+        st4.textContent = 'No failure detected';
+      }
+
+      // 5. Reaper Recovery
+      const s5 = document.getElementById('pipe-step-5');
+      const st5 = document.getElementById('pipe-status-5');
+      const reapedEvent = events.find(e => (e.details && e.details.dead_reason === 'lease_expired_max_attempts') || (e.from_state === 'LEASED' && e.to_state === 'QUEUED'));
+      if (reapedEvent || hasExpiredAttempt) {
+        s5.className = 'step-box state-warn';
+        st5.innerHTML = '🔄 Reaper recovered expired lease';
+      } else if (attempts.length > 1) {
+        s5.className = 'step-box state-warn';
+        st5.innerHTML = `🔄 Retried (Attempt #${attempts.length})`;
+      } else if (job.state === 'SUCCEEDED') {
+        s5.className = 'step-box state-success';
+        st5.textContent = 'No recovery needed';
+      } else {
+        s5.className = 'step-box';
+        st5.textContent = 'Standby';
+      }
+
+      // 6. Terminal Outcome
+      const s6 = document.getElementById('pipe-step-6');
+      const st6 = document.getElementById('pipe-status-6');
+      if (job.state === 'SUCCEEDED') {
+        s6.className = 'step-box state-success';
+        st6.innerHTML = `✅ <strong>SUCCEEDED</strong> (${attempts.length} att)`;
+      } else if (job.state === 'DEAD') {
+        s6.className = 'step-box state-danger';
+        st6.innerHTML = '⛔ <strong>DEAD-LETTERED</strong> (DLQ)';
+      } else if (job.state === 'LEASED') {
+        s6.className = 'step-box state-active';
+        st6.innerHTML = '⏳ <strong>IN-FLIGHT</strong>';
+      } else {
+        s6.className = 'step-box';
+        st6.textContent = job.state || 'QUEUED';
+      }
+    }
+
+    async function loadTimeline() {
+      try {
+        const res = await fetch(`/api/ops/jobs/${jobId}/timeline`);
+        if (!res.ok) {
+          document.getElementById('job-id-title').textContent = 'Job Not Found (404)';
+          return;
+        }
+        const data = await res.json();
+        const job = data.job || {};
+        const timeline = data.timeline || {};
+
+        document.getElementById('job-id-title').textContent = job.id || jobId;
+        document.getElementById('job-type-sub').textContent = `Type: ${escapeHtml(job.job_type || '')}`;
+        document.getElementById('job-state-badge').innerHTML = `<span class="badge badge-${job.state}">${job.state}</span>`;
+        document.getElementById('job-created').textContent = job.created_at || '-';
+        document.getElementById('job-finished').textContent = job.finished_at || 'In Flight / Pending';
+        document.getElementById('job-attempts-count').textContent = `${(timeline.attempts || []).length} attempt(s)`;
+
+        // Payload (truncated at 2 KB and escaped)
+        let payloadStr = '';
+        try {
+          payloadStr = typeof job.payload === 'object' ? JSON.stringify(job.payload, null, 2) : String(job.payload || '');
+        } catch (e) { payloadStr = String(job.payload || ''); }
+        if (payloadStr.length > 2048) {
+          payloadStr = payloadStr.substring(0, 2048) + '\n... [TRUNCATED AT 2 KiB]';
+        }
+        document.getElementById('job-payload-box').textContent = payloadStr;
+        updateLifecyclePipeline(job, timeline);
+
+        // Render Attempts Bands
+        const attContainer = document.getElementById('attempts-container');
+        const attempts = timeline.attempts || [];
+        if (attempts.length === 0) {
+          attContainer.innerHTML = '<div style="color:#94a3b8;">No execution attempts recorded.</div>';
+        } else {
+          attContainer.innerHTML = attempts.map(att => {
+            const outcome = att.outcome || 'in_flight';
+            return `
+              <div class="attempt-band ${outcome}">
+                <div class="attempt-header">
+                  <div class="attempt-title">Attempt #${att.attempt_no} &bull; Worker: <code>${escapeHtml(att.worker_id)}</code></div>
+                  <span class="chip chip-${outcome}">${outcome.toUpperCase()}</span>
+                </div>
+                <div class="attempt-meta">
+                  <span>Fencing Token: <strong>${att.fencing_token}</strong></span>
+                  <span>Started: ${att.started_at ? new Date(att.started_at).toLocaleTimeString() : '-'}</span>
+                  <span>Finished: ${att.finished_at ? new Date(att.finished_at).toLocaleTimeString() : 'Active'}</span>
+                </div>
+                ${att.error_message ? `<div style="margin-top:10px; font-size:12px; color:#fca5a5; background:rgba(239,68,68,0.1); padding:6px 10px; border-radius:4px;">Error: ${escapeHtml(att.error_message)}</div>` : ''}
+              </div>
+            `;
+          }).join('');
+        }
+
+        // Render Audit Events Stream
+        const evContainer = document.getElementById('events-stream');
+        const events = timeline.events || [];
+        if (events.length === 0) {
+          evContainer.innerHTML = '<div style="color:#94a3b8;">No audit events recorded for this job.</div>';
+        } else {
+          evContainer.innerHTML = events.map(ev => {
+            const isStale = ev.action === 'stale_write_rejected';
+            return `
+              <div class="event-node ${isStale ? 'stale' : ''}">
+                <div class="event-time">${ev.timestamp}</div>
+                <div style="font-weight:600; margin-top:2px;">
+                  ${escapeHtml(ev.actor)} &bull; ${escapeHtml(ev.action)}
+                  ${isStale ? '<span class="event-tag stale">REJECTED 409 (FENCING)</span>' : ''}
+                </div>
+                ${ev.from_state ? `<div style="font-size:12px; color:#94a3b8;">State Transition: <code>${ev.from_state} &rarr; ${ev.to_state}</code></div>` : ''}
+                ${ev.details ? `<div style="font-family:monospace; font-size:11px; color:#94a3b8; margin-top:2px;">${escapeHtml(JSON.stringify(ev.details))}</div>` : ''}
+              </div>
+            `;
+          }).join('');
+        }
+
+        // Load Downstream Ledger Evidence
+        loadLedgerEvidence();
+      } catch (err) {
+        console.error('Failed to load timeline', err);
+      }
+    }
+
+    async function loadLedgerEvidence() {
+      try {
+        const res = await fetch(`/api/ops/jobs/${jobId}/ledger`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const entries = data.entries || [];
+        const tbody = document.getElementById('ledger-evidence-body');
+        if (entries.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:20px;">No charges recorded in downstream ledger for this job ID.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = entries.map(e => `
+          <tr>
+            <td><span class="badge" style="background:${e.entry_type === 'applied' ? '#064e3b' : '#78350f'}; color:${e.entry_type === 'applied' ? '#6ee7b7' : '#fde68a'}">${e.entry_type.toUpperCase()}</span></td>
+            <td><code>${escapeHtml(e.order_id)}</code></td>
+            <td>$${(e.amount_cents / 100).toFixed(2)}</td>
+            <td style="font-family:monospace;">${e.fencing_token}</td>
+            <td style="font-family:monospace; font-size:11px;">${e.received_at}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        console.error('Failed to load ledger evidence', err);
+      }
+    }
+
+    function escapeHtml(str) {
+      if (typeof str !== 'string') return str;
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    loadTimeline();
+  </script>
+</body>
+</html>

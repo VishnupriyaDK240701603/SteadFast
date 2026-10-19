@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Steadfast Operations Console</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body {
+      background: #090d16;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    .ops-header {
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      padding: 16px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .ops-brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .ops-brand h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 800;
+      color: #38bdf8;
+      letter-spacing: -0.5px;
+    }
+    .health-strip {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+      font-family: monospace;
+    }
+    .health-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: #1e293b;
+      color: #94a3b8;
+    }
+    .health-pill.up { background: #064e3b; color: #6ee7b7; }
+    .health-pill.down { background: #881337; color: #fca5a5; }
+    .health-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .ops-container {
+      padding: 24px 28px;
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 16px 20px;
+    }
+    .kpi-label { font-size: 11px; text-transform: uppercase; color: #94a3b8; font-weight: 600; margin-bottom: 6px; }
+    .kpi-val { font-size: 24px; font-weight: 800; font-family: monospace; }
+    .kpi-val.queued { color: #facc15; }
+    .kpi-val.leased { color: #38bdf8; }
+    .kpi-val.succeeded { color: #10b981; }
+    .kpi-val.dead { color: #ef4444; }
+
+    .ops-toolbar {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 14px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .filter-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .filter-btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #cbd5e1;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .filter-btn:hover { background: #334155; }
+    .filter-btn.active { background: #0284c7; border-color: #38bdf8; color: #fff; }
+    .presenter-btn {
+      background: #064e3b;
+      border: 1px solid #10b981;
+      color: #6ee7b7;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .presenter-btn:hover { background: #047857; color: #fff; }
+
+    .data-table-card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 28px;
+    }
+    .table-title-bar {
+      padding: 14px 20px;
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .table-title { font-size: 14px; font-weight: 700; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+    th {
+      background: #0b1120;
+      color: #94a3b8;
+      padding: 10px 16px;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid #1e293b;
+    }
+    td { padding: 12px 16px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
+    .job-link { color: #38bdf8; text-decoration: none; font-family: monospace; font-weight: 700; }
+    .job-link:hover { text-decoration: underline; color: #7dd3fc; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      font-family: monospace;
+    }
+    .badge-QUEUED { background: #713f12; color: #fef08a; }
+    .badge-LEASED { background: #0c4a6e; color: #bae6fd; }
+    .badge-SUCCEEDED { background: #064e3b; color: #a7f3d0; }
+    .badge-DEAD { background: #881337; color: #fecdd3; }
+
+    .pagination-bar {
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      background: #0b1120;
+    }
+    .btn-nav {
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #f8fafc;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn-nav:disabled { opacity: 0.4; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <header class="ops-header">
+    <div class="ops-brand">
+      <h1>STEADFAST OPERATIONS CONSOLE</h1>
+      <span class="badge" style="background:#1e293b; color:#94a3b8;">F15/F16 PRODUCTION VIEW</span>
+    </div>
+    <div class="health-strip">
+      <div id="hp-pg" class="health-pill up"><span class="health-dot"></span> PostgreSQL (Primary)</div>
+      <div id="hp-redis" class="health-pill up"><span class="health-dot"></span> Redis</div>
+      <div id="hp-ledger" class="health-pill up"><span class="health-dot"></span> Downstream Ledger</div>
+      <a href="/ops/logout" style="color:#94a3b8; font-size:12px; text-decoration:none; margin-left:12px;">Sign Out</a>
+    </div>
+  </header>
+
+  <div class="ops-container">
+    <!-- Summary KPIs -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Queued Jobs</div>
+        <div id="kpi-queued" class="kpi-val queued">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Active Leases (In-Flight)</div>
+        <div id="kpi-leased" class="kpi-val leased">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Succeeded Jobs</div>
+        <div id="kpi-succeeded" class="kpi-val succeeded">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Dead-Letter Queue</div>
+        <div id="kpi-dead" class="kpi-val dead">0</div>
+      </div>
+    </div>
+
+    <!-- Filter & Navigation Toolbar -->
+    <div class="ops-toolbar">
+      <div class="filter-group">
+        <span style="font-size:12px; font-weight:600; color:#94a3b8; margin-right:4px;">QUICK FILTERS:</span>
+        <button id="qf-all" class="filter-btn active" onclick="setQuickFilter('all')">All</button>
+        <button id="qf-retried" class="filter-btn" onclick="setQuickFilter('retried')">Retried (> 1 attempt)</button>
+        <button id="qf-lease_expired" class="filter-btn" onclick="setQuickFilter('lease_expired')">Lease Expired</button>
+        <button id="qf-dead" class="filter-btn" onclick="setQuickFilter('dead')">Dead-Lettered</button>
+        <button id="qf-stale" class="filter-btn" onclick="setQuickFilter('stale')">Stale Write Rejected</button>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button onclick="openAssignTaskModal()" style="background:#0284c7; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:700; cursor:pointer; font-size:13px; display:flex; align-items:center; gap:6px; box-shadow:0 2px 8px rgba(2,132,199,0.3);">
+          ➕ Assign New Task
+        </button>
+        <button class="presenter-btn" onclick="openRandomRetriedJob()">🎲 Open a random retried job</button>
+        <button onclick="openArchModal()" style="background:#1e293b; color:#38bdf8; border:1px solid #0284c7; padding:8px 14px; border-radius:6px; font-weight:700; cursor:pointer; font-size:12px;">📖 Jury Architecture Flow</button>
+      </div>
+    </div>
+
+    <!-- Active Worker Fleet Panel -->
+    <div class="workers-fleet-card" style="background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:20px 24px; margin-bottom:24px; box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="background:#0284c7; color:#fff; font-size:11px; font-weight:800; padding:3px 8px; border-radius:4px; text-transform:uppercase;">Cluster Nodes</span>
+          <h3 style="margin:0; font-size:16px; color:#38bdf8; font-weight:700;">Active Worker Fleet (4 Background Replicas)</h3>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="font-size:12px; color:#94a3b8;">Poll Interval: <code style="color:#cbd5e1;">500ms</code> &bull; Lease TTL: <code style="color:#cbd5e1;">10s</code></span>
+          
+        </div>
+      </div>
+
+      <div id="workers-grid" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:14px;">
+        <div style="grid-column:1/-1; text-align:center; color:#94a3b8; padding:16px;">Discovering worker nodes...</div>
+      </div>
+    </div>
+
+    <!-- Jobs Table Card -->
+    <div class="data-table-card">
+      <div class="table-title-bar">
+        <div class="table-title">Tenant Jobs Directory</div>
+        <div style="display:flex; gap:10px;">
+          <input type="text" id="filter-search" placeholder="Filter by Job ID prefix or Type..." onkeyup="renderTable()" style="background:#020617; border:1px solid #334155; border-radius:4px; padding:4px 10px; color:#fff; font-size:12px; width:220px;">
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Job ID</th>
+            <th>Type</th>
+            <th>State</th>
+            <th>Attempts</th>
+            <th>Fencing Token</th>
+            <th>Worker ID</th>
+            <th>Created At</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="jobs-table-body">
+          <tr><td colspan="8" style="text-align:center; color:#94a3b8; padding:32px;">Loading jobs data...</td></tr>
+        </tbody>
+      </table>
+      <div class="pagination-bar">
+        <span id="page-info" style="font-size:12px; color:#94a3b8;">Showing 0-0 of 0</span>
+        <button id="btn-prev" class="btn-nav" onclick="changePage(-1)" disabled>Previous</button>
+        <button id="btn-next" class="btn-nav" onclick="changePage(1)" disabled>Next</button>
+      </div>
+    </div>
+
+    <!-- Audit Log Card -->
+    <div class="data-table-card">
+      <div class="table-title-bar">
+        <div class="table-title">Recent System Audit Events (Append-Only)</div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Actor</th>
+            <th>Action</th>
+            <th>Job ID</th>
+            <th>Transition</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="audit-table-body">
+          <tr><td colspan="6" style="text-align:center; color:#94a3b8; padding:24px;">Loading audit events...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let allJobs = [];
+    let currentFilter = 'all';
+    let currentPage = 1;
+    const pageSize = 15;
+
+    async function loadData() {
+      try {
+        const res = await fetch('/api/ops/jobs');
+        if (res.status === 401) {
+          window.location.href = '/ops/login';
+          return;
+        }
+        const data = await res.json();
+        allJobs = data.jobs || [];
+
+        // Update KPIs
+        let queued = 0, leased = 0, succeeded = 0, dead = 0;
+        allJobs.forEach(j => {
+          if (j.state === 'QUEUED') queued++;
+          else if (j.state === 'LEASED') leased++;
+          else if (j.state === 'SUCCEEDED') succeeded++;
+          else if (j.state === 'DEAD') dead++;
+        });
+        document.getElementById('kpi-queued').textContent = queued;
+        document.getElementById('kpi-leased').textContent = leased;
+        document.getElementById('kpi-succeeded').textContent = succeeded;
+        document.getElementById('kpi-dead').textContent = dead;
+
+        renderTable();
+        loadAuditLog();
+      } catch (err) {
+        console.error('Failed to load ops data', err);
+      }
+    }
+
+    async function loadAuditLog() {
+      try {
+        const res = await fetch('/api/ops/audit');
+        if (res.ok) {
+          const events = await res.json();
+          const tbody = document.getElementById('audit-table-body');
+          if (!events || events.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#94a3b8; padding:20px;">No audit events found</td></tr>';
+            return;
+          }
+          tbody.innerHTML = events.slice(0, 15).map(e => `
+            <tr>
+              <td style="font-family:monospace; font-size:11px;">${escapeHtml(e.ts || '')}</td>
+              <td style="font-weight:600;">${escapeHtml(e.actor || 'system')}</td>
+              <td><span class="badge" style="background:#1e293b; color:${e.action === 'stale_write_rejected' ? '#f87171' : '#38bdf8'}">${escapeHtml(e.action || '')}</span></td>
+              <td style="font-family:monospace;"><a href="/jobs/${e.job_id}" class="job-link">${(e.job_id || '').substring(0, 8)}...</a></td>
+              <td>${e.from_state ? `${e.from_state} &rarr; ${e.to_state}` : '-'}</td>
+              <td style="font-family:monospace; font-size:11px; color:#94a3b8;">${escapeHtml(JSON.stringify(e.details || {}))}</td>
+            </tr>
+          `).join('');
+        }
+      } catch (err) {
+        console.error('Failed to load audit log', err);
+      }
+    }
+
+    function setQuickFilter(f) {
+      currentFilter = f;
+      document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.getElementById('qf-' + f);
+      if (activeBtn) activeBtn.classList.add('active');
+      currentPage = 1;
+      renderTable();
+    }
+
+    function renderTable() {
+      const search = (document.getElementById('filter-search').value || '').toLowerCase();
+      let filtered = allJobs.filter(j => {
+        if (search) {
+          const matchId = (j.id || '').toLowerCase().includes(search);
+          const matchType = (j.job_type || '').toLowerCase().includes(search);
+          if (!matchId && !matchType) return false;
+        }
+        if (currentFilter === 'retried') return (j.attempts || 0) > 1;
+        if (currentFilter === 'lease_expired') return (j.last_error || '').includes('lease_expired');
+        if (currentFilter === 'dead') return j.state === 'DEAD';
+        if (currentFilter === 'stale') return (j.last_error || '').includes('stale') || (j.has_stale_rejections === true);
+        return true;
+      });
+
+      const total = filtered.length;
+      const totalPages = Math.ceil(total / pageSize) || 1;
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      const start = (currentPage - 1) * pageSize;
+      const pageItems = filtered.slice(start, start + pageSize);
+
+      const tbody = document.getElementById('jobs-table-body');
+      if (pageItems.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#94a3b8; padding:32px;">No matching jobs found</td></tr>';
+      } else {
+        tbody.innerHTML = pageItems.map(j => `
+          <tr>
+            <td><a href="/jobs/${j.id}" class="job-link">${j.id.substring(0, 8)}...</a></td>
+            <td><code>${escapeHtml(j.job_type)}</code></td>
+            <td>
+              <span class="badge badge-${j.state}">${j.state}</span>
+              ${j.last_error ? `<div style="color:#f87171; font-size:10px; margin-top:2px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(j.last_error)}">⚠️ ${escapeHtml(j.last_error)}</div>` : ''}
+            </td>
+            <td><strong>${j.attempts}</strong> / ${j.max_attempts}</td>
+            <td style="font-family:monospace;">${j.fencing_token}</td>
+            <td style="font-family:monospace;">
+              ${j.worker_id ? `<span style="background:#1e293b; color:#38bdf8; padding:3px 8px; border-radius:4px; font-size:11px; display:inline-block; border:1px solid #334155;">🤖 ${escapeHtml(j.worker_id)}</span>` : '<span style="color:#64748b;">(unassigned)</span>'}
+            </td>
+            <td style="font-size:11px; color:#94a3b8;">${j.created_at ? new Date(j.created_at).toLocaleTimeString() : '-'}</td>
+            <td><a href="/jobs/${j.id}" class="btn-nav" style="text-decoration:none; display:inline-block; padding:4px 8px; font-size:11px;">View Timeline &rarr;</a></td>
+          </tr>
+        `).join('');
+      }
+
+      document.getElementById('page-info').textContent = `Showing ${total > 0 ? start + 1 : 0}-${Math.min(start + pageSize, total)} of ${total}`;
+      document.getElementById('btn-prev').disabled = currentPage <= 1;
+      document.getElementById('btn-next').disabled = currentPage >= totalPages;
+    }
+
+    function changePage(delta) {
+      currentPage += delta;
+      renderTable();
+    }
+
+    function openRandomRetriedJob() {
+      const retried = allJobs.filter(j => (j.attempts || 0) > 1);
+      if (retried.length === 0) {
+        alert('No retried jobs found in current dataset.');
+        return;
+      }
+      const randomJob = retried[Math.floor(Math.random() * retried.length)];
+      window.location.href = `/jobs/${randomJob.id}`;
+    }
+
+    function escapeHtml(str) {
+      if (typeof str !== 'string') return str;
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function openAssignTaskModal() {
+      document.getElementById('task-order').value = 'ORD-' + Math.floor(1000 + Math.random() * 9000);
+      document.getElementById('task-customer').value = 'Customer-' + Math.floor(100 + Math.random() * 900);
+      document.getElementById('assign-status').style.display = 'none';
+      document.getElementById('assign-modal').style.display = 'flex';
+    }
+
+    function closeAssignTaskModal() {
+      document.getElementById('assign-modal').style.display = 'none';
+    }
+
+    async function submitNewTask(e) {
+      e.preventDefault();
+      const btn = document.getElementById('assign-submit-btn');
+      const statusBox = document.getElementById('assign-status');
+      btn.disabled = true;
+      btn.textContent = 'Enqueuing...';
+
+      let sleepSec = 6;
+      if (document.getElementById('task-duration')) {
+        sleepSec = parseInt(document.getElementById('task-duration').value || '6', 10);
+      }
+
+      const payload = {
+        type: document.getElementById('task-type').value,
+        customer_id: document.getElementById('task-customer').value,
+        order_id: document.getElementById('task-order').value,
+        amount_dollars: parseFloat(document.getElementById('task-amount').value || '0'),
+        sleep_seconds: sleepSec
+      };
+
+      try {
+        const res = await fetch('/api/ops/jobs/enqueue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          statusBox.style.display = 'block';
+          statusBox.style.background = 'rgba(239,68,68,0.15)';
+          statusBox.style.border = '1px solid #ef4444';
+          statusBox.style.color = '#fca5a5';
+          statusBox.textContent = 'Error: ' + (errData.error || errData.message || res.statusText);
+          btn.disabled = false;
+          btn.textContent = '🚀 Dispatch to Workers';
+          return;
+        }
+
+        const data = await res.json();
+        const jobId = data.job_id || 'unknown';
+
+        statusBox.style.display = 'block';
+        statusBox.style.background = 'rgba(16,185,129,0.15)';
+        statusBox.style.border = '1px solid #10b981';
+        statusBox.style.color = '#6ee7b7';
+        statusBox.innerHTML = `
+          <div style="font-weight:700; margin-bottom:4px;">✅ Task Enqueued &amp; Dispatched!</div>
+          <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;">Job ID: <code style="color:#38bdf8;">${jobId}</code></div>
+          <div style="font-size:11px; color:#94a3b8; margin-bottom:8px;">A background worker is claiming this task with a fencing token. Watch the Worker Fleet above!</div>
+          <div style="margin-top:8px;">
+            <a href="/jobs/${jobId}" style="display:inline-block; background:#10b981; color:#022c22; padding:6px 12px; border-radius:4px; font-weight:700; text-decoration:none; font-size:12px;">👉 View Live Execution Timeline</a>
+          </div>
+        `;
+
+        btn.disabled = false;
+        btn.textContent = '🚀 Dispatch Another Task';
+        loadData();
+        loadWorkers();
+      } catch (err) {
+        statusBox.style.display = 'block';
+        statusBox.style.background = 'rgba(239,68,68,0.15)';
+        statusBox.style.border = '1px solid #ef4444';
+        statusBox.style.color = '#fca5a5';
+        statusBox.textContent = 'Network error while dispatching task.';
+        btn.disabled = false;
+        btn.textContent = '🚀 Dispatch to Workers';
+      }
+    }
+
+    function openArchModal() {
+      document.getElementById('arch-modal').style.display = 'flex';
+    }
+    function closeArchModal() {
+      document.getElementById('arch-modal').style.display = 'none';
+    }
+
+    async function triggerWorkerAction(workerId, action) {
+      try {
+        const res = await fetch(`/api/ops/workers/${encodeURIComponent(workerId)}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: action })
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          alert('Action failed: ' + (errData.error || res.statusText));
+          return;
+        }
+        await loadWorkers();
+      } catch (err) {
+        alert('Worker action error: ' + err.message);
+      }
+    }
+
+    async function loadWorkers() {
+      try {
+        const res = await fetch('/api/ops/workers');
+        if (!res.ok) return;
+        const data = await res.json();
+        const workers = data.workers || [];
+        const grid = document.getElementById('workers-grid');
+        if (!grid) return;
+
+        grid.innerHTML = workers.map(w => {
+          const isCrashed = w.container_state === 'exited' || w.status === 'CRASHED';
+          const isFrozen = w.container_state === 'paused' || w.status === 'FROZEN';
+          const isBusy = w.status === 'BUSY';
+
+          let stateBadge = '';
+          let borderColor = '#1e293b';
+          let bgColor = '#090d16';
+
+          if (isCrashed) {
+            borderColor = '#ef4444';
+            bgColor = 'rgba(239,68,68,0.08)';
+            stateBadge = '<span style="font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; text-transform:uppercase; background:#7f1d1d; color:#fca5a5;">🔴 CRASHED</span>';
+          } else if (isFrozen) {
+            borderColor = '#f59e0b';
+            bgColor = 'rgba(245,158,11,0.08)';
+            stateBadge = '<span style="font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; text-transform:uppercase; background:#78350f; color:#fde68a;">⏸️ FROZEN</span>';
+          } else if (isBusy) {
+            borderColor = '#38bdf8';
+            bgColor = 'rgba(56,189,248,0.08)';
+            stateBadge = '<span style="font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; text-transform:uppercase; background:#0369a1; color:#bae6fd;">⚡ BUSY</span>';
+          } else {
+            stateBadge = '<span style="font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; text-transform:uppercase; background:#064e3b; color:#6ee7b7;">🟢 IDLE</span>';
+          }
+
+          let bodyContent = '';
+          if (isCrashed) {
+            bodyContent = `
+              <div style="color:#fca5a5; font-weight:700; margin-bottom:4px;">Process Terminated</div>
+              <div style="color:#94a3b8; font-size:11px;">Container is stopped. Heartbeats ceased. Lease will expire and Reaper will re-queue the work.</div>
+            `;
+          } else if (isFrozen) {
+            bodyContent = `
+              <div style="color:#fde68a; font-weight:700; margin-bottom:4px;">Container Paused (Stalled)</div>
+              <div style="color:#94a3b8; font-size:11px;">Heartbeats suspended. Lease will expire. Stale writes will be rejected upon unpause.</div>
+            `;
+          } else if (isBusy) {
+            bodyContent = `
+              <div style="color:#38bdf8; font-weight:700; margin-bottom:4px;">Holding Lease (Token #${w.fencing_token})</div>
+              <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">Task: <a href="/jobs/${w.current_job_id}" style="color:#38bdf8; font-weight:600; text-decoration:none;">${(w.current_job_id || '').substring(0,8)}...</a></div>
+              <div style="color:#fde68a; font-size:11px; display:flex; justify-content:space-between;">
+                <span>Lease TTL: <b>${w.lease_expires_in_sec}s</b></span>
+                <span style="color:#6ee7b7;">💓 Active Heartbeat</span>
+              </div>
+            `;
+          } else {
+            bodyContent = `
+              <div style="color:#6ee7b7; font-weight:600; margin-bottom:2px;">Listening for Enqueued Work...</div>
+              <div style="color:#64748b; font-size:11px;">Worker ID: ${escapeHtml(w.worker_id)}</div>
+              <div style="color:#64748b; font-size:11px;">Status: Healthy &amp; Ready</div>
+            `;
+          }
+
+          let actionButtons = `
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:10px;">
+              <button onclick="triggerWorkerAction('${w.worker_id}', 'crash')" style="background:#450a0a; color:#fca5a5; border:1px solid #7f1d1d; border-radius:4px; padding:6px; font-size:11px; font-weight:700; cursor:pointer;" title="Hard-kill worker process (SIGKILL)">💥 Crash</button>
+              <button onclick="triggerWorkerAction('${w.worker_id}', 'freeze')" style="background:#451a03; color:#fde68a; border:1px solid #78350f; border-radius:4px; padding:6px; font-size:11px; font-weight:700; cursor:pointer;" title="Pause worker container & stall heartbeats">⏸️ Freeze</button>
+            </div>
+          `;
+          if (isCrashed || isFrozen) {
+            actionButtons = `
+              <div style="margin-top:10px;">
+                <button onclick="triggerWorkerAction('${w.worker_id}', 'resume')" style="width:100%; background:#064e3b; color:#6ee7b7; border:1px solid #059669; border-radius:4px; padding:8px; font-size:11px; font-weight:800; cursor:pointer;" title="Resume paused worker or restart stopped worker">▶️ Revoke &amp; Restart Worker</button>
+              </div>
+            `;
+          }
+
+          return `
+            <div style="background:${bgColor}; border:1px solid ${borderColor}; border-radius:8px; padding:14px; display:flex; flex-direction:column; box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-weight:700; font-size:13px; color:#f8fafc; display:flex; align-items:center; gap:6px;">
+                  <span>🤖</span> ${escapeHtml(w.name || w.worker_id)}
+                </div>
+                ${stateBadge}
+              </div>
+              <div style="font-size:11px; font-family:monospace; color:#64748b; margin-bottom:10px;">${escapeHtml(w.container_name || w.worker_id)}</div>
+              <div style="background:#020617; border:1px solid #1e293b; border-radius:6px; padding:8px 10px; font-size:11px; flex-grow:1;">
+                ${bodyContent}
+              </div>
+              ${actionButtons}
+            </div>
+          `;
+        }).join('');
+      } catch (err) {
+        console.error('Failed to load workers', err);
+      }
+    }
+
+    loadWorkers();
+    loadData();
+    setInterval(loadData, 3000);
+    setInterval(loadWorkers, 1500);
+  </script>
+  <!-- Modal: Assign New Task -->
+  <div id="assign-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:#0f172a; border:1px solid #1e293b; border-radius:12px; width:100%; max-width:480px; padding:24px 28px; box-shadow:0 20px 40px rgba(0,0,0,0.6);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h3 style="margin:0; font-size:18px; color:#38bdf8; font-weight:700;">Assign Task to Steadfast Engine</h3>
+        <button onclick="closeAssignTaskModal()" style="background:none; border:none; color:#94a3b8; font-size:24px; cursor:pointer;">&times;</button>
+      </div>
+      <p style="font-size:13px; color:#94a3b8; margin-top:0; margin-bottom:20px;">
+        Submit a real task into the Steadfast queue. Active background workers will pick it up, acquire a fencing token, and execute it live.
+      </p>
+
+      <form id="assign-task-form" onsubmit="submitNewTask(event)">
+        <div style="margin-bottom:16px;">
+          <label style="display:block; font-size:11px; text-transform:uppercase; color:#cbd5e1; font-weight:600; margin-bottom:6px;">Task Type</label>
+          <select id="task-type" style="width:100%; box-sizing:border-box; background:#020617; border:1px solid #334155; border-radius:6px; padding:10px; color:#fff; font-size:13px;">
+            <option value="charge_customer">charge_customer (Charges Customer &amp; Commits to Ledger)</option>
+            <option value="email_dispatch">email_dispatch (Asynchronous Email Delivery)</option>
+            <option value="data_pipeline">data_pipeline (Batch Data Transformation)</option>
+            <option value="report_generate">report_generate (Financial Reconciliation Report)</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <label style="display:block; font-size:11px; text-transform:uppercase; color:#cbd5e1; font-weight:600; margin-bottom:6px;">Customer Name / Identifier</label>
+          <input type="text" id="task-customer" required placeholder="e.g. Acme Corp / user_88" style="width:100%; box-sizing:border-box; background:#020617; border:1px solid #334155; border-radius:6px; padding:10px; color:#fff; font-size:13px;">
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+          <div>
+            <label style="display:block; font-size:11px; text-transform:uppercase; color:#cbd5e1; font-weight:600; margin-bottom:6px;">Order Ref #</label>
+            <input type="text" id="task-order" required placeholder="e.g. ORD-1004" style="width:100%; box-sizing:border-box; background:#020617; border:1px solid #334155; border-radius:6px; padding:10px; color:#fff; font-size:13px;">
+          </div>
+          <div>
+            <label style="display:block; font-size:11px; text-transform:uppercase; color:#cbd5e1; font-weight:600; margin-bottom:6px;">Amount ($ USD)</label>
+            <input type="number" step="0.01" id="task-amount" required placeholder="e.g. 150.00" value="75.00" style="width:100%; box-sizing:border-box; background:#020617; border:1px solid #334155; border-radius:6px; padding:10px; color:#fff; font-size:13px;">
+          </div>
+        </div>
+
+        <div style="margin-bottom:20px;">
+          <label style="display:block; font-size:11px; text-transform:uppercase; color:#cbd5e1; font-weight:600; margin-bottom:6px;">Task Execution Duration (Observability Window)</label>
+          <select id="task-duration" style="width:100%; box-sizing:border-box; background:#020617; border:1px solid #38bdf8; border-radius:6px; padding:10px; color:#38bdf8; font-weight:700; font-size:13px;">
+            <option value="6" selected>⏱️ 6 Seconds (Standard - Ample time to test Crash or Freeze on Worker)</option>
+            <option value="12">⏱️ 12 Seconds (Extended - Great for observing heartbeats &amp; Reaper recovery)</option>
+            <option value="1">⚡ 1 Second (Fast Execution)</option>
+          </select>
+          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">
+            While the task runs, the worker actively heartbeats and renews its lease. You can crash or freeze that specific worker using the buttons on its card in the Worker Fleet!
+          </div>
+        </div>
+
+        <div id="assign-status" style="display:none; padding:12px; border-radius:6px; margin-bottom:16px; font-size:13px;"></div>
+
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button type="button" onclick="closeAssignTaskModal()" style="background:#1e293b; color:#cbd5e1; border:none; padding:10px 16px; border-radius:6px; font-weight:600; cursor:pointer;">Cancel</button>
+          <button type="submit" id="assign-submit-btn" style="background:#0284c7; color:#fff; border:none; padding:10px 20px; border-radius:6px; font-weight:700; cursor:pointer;">🚀 Dispatch to Workers</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Architecture Flow Guide for Jury -->
+  <div id="arch-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:99999; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+    <div style="background:#0f172a; border:1px solid #0284c7; border-radius:12px; width:100%; max-width:680px; padding:28px 32px; box-shadow:0 25px 50px rgba(0,0,0,0.7); max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="background:#0284c7; color:#fff; font-size:11px; font-weight:800; padding:3px 8px; border-radius:4px;">ENGINE ARCHITECTURE</span>
+          <h3 style="margin:0; font-size:18px; color:#38bdf8;">How Steadfast Guarantees Exactly-Once Effects</h3>
+        </div>
+        <button onclick="closeArchModal()" style="background:none; border:none; color:#94a3b8; font-size:24px; cursor:pointer;">&times;</button>
+      </div>
+      <p style="font-size:13px; color:#cbd5e1; margin-top:0; margin-bottom:20px; line-height:1.5;">
+        This 6-stage lifecycle explains how Steadfast guarantees <strong>zero lost jobs</strong>, <strong>zero double charges</strong>, and <strong>fenced zombie writes</strong> under crashes and network partitions:
+      </p>
+
+      <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:24px;">
+        <div style="background:#020617; border:1px solid #1e293b; border-radius:8px; padding:12px 16px;">
+          <div style="font-weight:700; color:#38bdf8; font-size:13px;">1. Worker Claims Job</div>
+          <div style="font-size:12px; color:#94a3b8; margin-top:2px;">Worker claims the job atomically using PostgreSQL <code>SELECT FOR UPDATE SKIP LOCKED</code>. State transitions from <code>QUEUED</code> &rarr; <code>LEASED</code>.</div>
+        </div>
+
+        <div style="background:#020617; border:1px solid #1e293b; border-radius:8px; padding:12px 16px;">
+          <div style="font-weight:700; color:#38bdf8; font-size:13px;">2. Lease &amp; Fencing Token Assigned</div>
+          <div style="font-size:12px; color:#94a3b8; margin-top:2px;">The engine assigns an exclusive lease deadline (e.g. 10s) and a strictly monotonically increasing <strong>Fencing Token</strong> (Token #1). Downstream systems require this token to reject stale attempts.</div>
+        </div>
+
+        <div style="background:#020617; border:1px solid #1e293b; border-radius:8px; padding:12px 16px;">
+          <div style="font-weight:700; color:#38bdf8; font-size:13px;">3. Heartbeat Renews Lease</div>
+          <div style="font-size:12px; color:#94a3b8; margin-top:2px;">While processing, the worker sends periodic heartbeats every 2 seconds to report continued ownership, advancing <code>lease_expires_at</code>.</div>
+        </div>
+
+        <div style="background:#020617; border:1px solid #1e293b; border-radius:8px; padding:12px 16px;">
+          <div style="font-weight:700; color:#f87171; font-size:13px;">4. Worker Crashes or Lease Expires</div>
+          <div style="font-size:12px; color:#94a3b8; margin-top:2px;">If a worker crashes (SIGKILL, freeze, OOM, network break), heartbeats halt and the lease deadline expires.</div>
+        </div>
+
+        <div style="background:#020617; border:1px solid #1e293b; border-radius:8px; padding:12px 16px;">
+          <div style="font-weight:700; color:#f59e0b; font-size:13px;">5. Reaper Detects Expired Lease</div>
+          <div style="font-size:12px; color:#94a3b8; margin-top:2px;">An independent leader-elected Reaper process constantly queries <code>lease_expires_at &lt; now()</code>. It revokes the dead worker's lease, makes the job eligible for Attempt #2, and increments the fencing token (Token #2). If the zombie worker ever wakes up, its write is rejected with <code>409 Stale Fencing Token</code>.</div>
+        </div>
+
+        <div style="background:#020617; border:1px solid #1e293b; border-radius:8px; padding:12px 16px;">
+          <div style="font-weight:700; color:#10b981; font-size:13px;">6. Retry or Terminal Outcome</div>
+          <div style="font-size:12px; color:#94a3b8; margin-top:2px;">A healthy replacement worker executes Attempt #2, commits the transaction to the ledger, and transitions the job to <code>SUCCEEDED</code>. Unrecoverable tasks are quarantined in the Dead-Letter Queue (<code>DEAD</code>).</div>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end;">
+        <button onclick="closeArchModal()" style="background:#0284c7; color:#fff; border:none; padding:10px 20px; border-radius:6px; font-weight:700; cursor:pointer;">Got It</button>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

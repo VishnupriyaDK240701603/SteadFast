@@ -86,21 +86,84 @@ services:
       LEDGER_DB_PATH: "/data/ledger.db"
       ADMIN_KEY: ${ADMIN_KEY:-fake_admin_key}
 
-  worker:
+  worker-1:
     build:
       context: .
       args:
         TARGET: worker-example
     image: steadfast-worker:latest
+    container_name: steadfast-worker-1
     labels:
       - "steadfast.chaos=allow"
     restart: unless-stopped
-    deploy:
-      replicas: 4
     environment:
       API_BASE_URL: http://api:8080
       LEDGER_BASE_URL: http://ledger:8082
-      TENANT_KEY: ${TENANT_A_KEY:-}
+      TENANT_KEY: ${DEMO_TENANT_A_KEY:-${TENANT_A_KEY:-}}
+      WORKER_ID: worker-1
+      CONCURRENCY: "4"
+      POLL_INTERVAL_MS: "500"
+    depends_on:
+      - api
+      - ledger
+
+  worker-2:
+    build:
+      context: .
+      args:
+        TARGET: worker-example
+    image: steadfast-worker:latest
+    container_name: steadfast-worker-2
+    labels:
+      - "steadfast.chaos=allow"
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: http://api:8080
+      LEDGER_BASE_URL: http://ledger:8082
+      TENANT_KEY: ${DEMO_TENANT_A_KEY:-${TENANT_A_KEY:-}}
+      WORKER_ID: worker-2
+      CONCURRENCY: "4"
+      POLL_INTERVAL_MS: "500"
+    depends_on:
+      - api
+      - ledger
+
+  worker-3:
+    build:
+      context: .
+      args:
+        TARGET: worker-example
+    image: steadfast-worker:latest
+    container_name: steadfast-worker-3
+    labels:
+      - "steadfast.chaos=allow"
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: http://api:8080
+      LEDGER_BASE_URL: http://ledger:8082
+      TENANT_KEY: ${DEMO_TENANT_A_KEY:-${TENANT_A_KEY:-}}
+      WORKER_ID: worker-3
+      CONCURRENCY: "4"
+      POLL_INTERVAL_MS: "500"
+    depends_on:
+      - api
+      - ledger
+
+  worker-4:
+    build:
+      context: .
+      args:
+        TARGET: worker-example
+    image: steadfast-worker:latest
+    container_name: steadfast-worker-4
+    labels:
+      - "steadfast.chaos=allow"
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: http://api:8080
+      LEDGER_BASE_URL: http://ledger:8082
+      TENANT_KEY: ${DEMO_TENANT_A_KEY:-${TENANT_A_KEY:-}}
+      WORKER_ID: worker-4
       CONCURRENCY: "4"
       POLL_INTERVAL_MS: "500"
     depends_on:
@@ -156,7 +219,7 @@ services:
     environment:
       API_BASE_URL: http://api:8080
       BASELINE_API_URL: http://baseline-api:8081
-      TENANT_KEY: ${TENANT_A_KEY:-}
+      TENANT_KEY: ${DEMO_TENANT_A_KEY:-${TENANT_A_KEY:-}}
 
   verifier:
     build:
@@ -168,10 +231,26 @@ services:
       - verifier
     environment:
       CHECKER_DATABASE_URL: postgres://steadfast_checker_ro:fake_ro_password_for_local_demo@postgres:5432/${POSTGRES_DB:-steadfast}?sslmode=disable
+      DASHBOARD_DATABASE_URL: postgres://steadfast_dashboard_ro:fake_dashboard_ro_password@postgres:5432/${POSTGRES_DB:-steadfast}?sslmode=disable
       LEDGER_URL: http://ledger:8082
       REDIS_URL: redis://redis:6379
 
 
+
+  reaper:
+    build:
+      context: .
+      args:
+        TARGET: reaper
+    image: steadfast-reaper:latest
+    container_name: steadfast-reaper
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-steadfast_user}:${POSTGRES_PASSWORD:-fake_dev_password}@postgres:5432/${POSTGRES_DB:-steadfast}?sslmode=disable
+      REAPER_INTERVAL_MS: 1000
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   dashboard:
     build:
@@ -180,13 +259,17 @@ services:
         TARGET: dashboard
     image: steadfast-dashboard:latest
     container_name: steadfast-dashboard
+    user: "0:0"
     restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "127.0.0.1:8085:8085"
     environment:
       PORT: "8085"
       STEADFAST_ENV: ${STEADFAST_ENV:-demo}
       CHECKER_DATABASE_URL: postgres://steadfast_checker_ro:fake_ro_password_for_local_demo@postgres:5432/${POSTGRES_DB:-steadfast}?sslmode=disable
+      DASHBOARD_DATABASE_URL: postgres://steadfast_dashboard_ro:fake_dashboard_ro_password@postgres:5432/${POSTGRES_DB:-steadfast}?sslmode=disable
       REDIS_URL: redis://redis:6379
       API_BASE_URL: http://api:8080
       BASELINE_API_URL: http://baseline-api:8081
@@ -194,6 +277,7 @@ services:
       LEDGER_BASE_URL: http://ledger:8082
       ADMIN_KEY: ${ADMIN_KEY:-fake_admin_key}
       DEMO_TENANT_A_KEY: ${DEMO_TENANT_A_KEY:-}
+      OPS_TOKEN: ${OPS_TOKEN:-fake_ops_token_for_local_demo_only}
     profiles:
       - dashboard
       - demo

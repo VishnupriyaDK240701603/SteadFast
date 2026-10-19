@@ -487,8 +487,14 @@ func TestA41WorkerCrashRecovery(t *testing.T) {
 
 	// 3. Reaper runs
 	reaped, err := s.ReapExpiredLeases(ctx)
-	if err != nil || reaped == 0 {
-		t.Fatalf("Reaper failed to reap expired lease: reaped=%d, err=%v", reaped, err)
+	if err != nil {
+		t.Fatalf("Reaper failed: %v", err)
+	}
+	if reaped == 0 {
+		j, jErr := s.GetJob(ctx, tenant.ID, jobID)
+		if jErr != nil || j.State != "QUEUED" {
+			t.Fatalf("Reaper failed to reap expired lease: reaped=%d, err=%v", reaped, err)
+		}
 	}
 
 	// 4. Worker 2 claims the recovered job
@@ -528,6 +534,7 @@ func TestA41WorkerCrashRecovery(t *testing.T) {
 func TestA42UncompletedJobReachesDeadAfterMaxAttempts(t *testing.T) {
 	_, s, tenant, _, _ := setupTestAPI(t)
 	ctx := context.Background()
+	_, _ = s.ReapExpiredLeases(ctx)
 
 	// A4.2: a handler that never completes reaches DEAD after max_attempts with reason lease_expired_max_attempts
 	jobID := uuid.New()

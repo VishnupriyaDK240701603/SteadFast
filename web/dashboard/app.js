@@ -155,17 +155,25 @@
     drawThroughputChart(blCtx, baselineThroughputHistory, '#f85149', 'rgba(248, 81, 73, 0.15)');
 
     // 3. Stakes Counters
+    const verdict = data.verdict;
     const stakes = data.stakes || {};
-    setText('st-double-charged', stakes.steadfast_double_charges || 0);
-    setText('st-orders-lost', stakes.steadfast_orders_lost || 0);
-    setText('st-dollars-lost', '$' + Number(stakes.steadfast_dollars_lost || 0).toFixed(2));
-
-    setText('bl-double-charged', stakes.baseline_double_charges || 0);
-    setText('bl-orders-lost', stakes.baseline_orders_lost || 0);
-    setText('bl-dollars-lost', '$' + Number(stakes.baseline_dollars_lost || 0).toFixed(2));
+    if (!verdict) {
+      setText('st-double-charged', 'no verdict yet');
+      setText('st-orders-lost', 'no verdict yet');
+      setText('st-dollars-lost', 'no verdict yet');
+      setText('bl-double-charged', 'no verdict yet');
+      setText('bl-orders-lost', 'no verdict yet');
+      setText('bl-dollars-lost', 'no verdict yet');
+    } else {
+      setText('st-double-charged', stakes.steadfast_double_charges || 0);
+      setText('st-orders-lost', stakes.steadfast_orders_lost || 0);
+      setText('st-dollars-lost', '$' + Number(stakes.steadfast_dollars_lost || 0).toFixed(2));
+      setText('bl-double-charged', stakes.baseline_double_charges || 0);
+      setText('bl-orders-lost', stakes.baseline_orders_lost || 0);
+      setText('bl-dollars-lost', '$' + Number(stakes.baseline_dollars_lost || 0).toFixed(2));
+    }
 
     // 4. Verdict Strip
-    const verdict = data.verdict;
     const badge = document.getElementById('verdict-badge');
     if (verdict && badge) {
       if (verdict.verdict === 'PASS') {
