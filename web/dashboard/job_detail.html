@@ -313,6 +313,9 @@
         <div class="meta-item"><span>Created At</span><div id="job-created" style="font-family:monospace;">-</div></div>
         <div class="meta-item"><span>Finished At</span><div id="job-finished" style="font-family:monospace;">-</div></div>
         <div class="meta-item"><span>Total Attempts</span><div id="job-attempts-count" style="font-weight:700;">-</div></div>
+        <div class="meta-item"><span>Fencing Token</span><div id="job-fencing-token" style="font-family:monospace; font-weight:700; color:#38bdf8;">-</div></div>
+        <div class="meta-item"><span>Active Worker</span><div id="job-worker-id" style="font-family:monospace; font-weight:700; color:#cbd5e1;">-</div></div>
+        <div class="meta-item"><span>Heartbeat / Lease TTL</span><div id="job-lease-ttl" style="font-family:monospace; font-weight:700;">-</div></div>
       </div>
       <div style="margin-top:16px;">
         <span style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600; display:block; margin-bottom:6px;">Payload (Max 2 KiB escaped)</span>
@@ -407,6 +410,55 @@
         </thead>
         <tbody id="ledger-evidence-body">
           <tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:20px;">Querying downstream ledger evidence...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- PostgreSQL Database Audit Explorer -->
+    <div class="meta-card" style="border: 1px solid #334155; margin-bottom:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div style="font-size:13px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.5px;">
+          🗄️ PostgreSQL Database Proof (Direct Table Records)
+        </div>
+        <span style="font-size:11px; color:#94a3b8; font-family:monospace;">Database: steadfast &bull; Tables: job_attempts &bull; audit_log</span>
+      </div>
+      <p style="font-size:12px; color:#94a3b8; margin-top:0; margin-bottom:12px;">
+        Every claim, heartbeat expiration, and reaper failover is persistently logged to disk in PostgreSQL. You can run this command in terminal to verify:
+      </p>
+      <div style="background:#020617; border:1px solid #1e293b; border-radius:6px; padding:10px 14px; font-family:monospace; font-size:11px; color:#6ee7b7; overflow-x:auto; margin-bottom:16px;">
+        docker exec steadfast-postgres psql -U steadfast_user -d steadfast -c "SELECT attempt_no, fencing_token, worker_id, started_at, finished_at, outcome FROM job_attempts WHERE job_id = '<span id="sql-job-id"></span>';"
+      </div>
+
+      <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:8px;">1. Raw Attempts Table (<code>job_attempts</code>):</div>
+      <table style="margin-bottom:20px;">
+        <thead>
+          <tr>
+            <th>Attempt #</th>
+            <th>Worker ID</th>
+            <th>Fencing Token</th>
+            <th>Started At</th>
+            <th>Finished At</th>
+            <th>Recorded Outcome</th>
+          </tr>
+        </thead>
+        <tbody id="db-attempts-tbody">
+          <tr><td colspan="6" style="text-align:center; color:#94a3b8; padding:12px;">Loading database attempts...</td></tr>
+        </tbody>
+      </table>
+
+      <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:8px;">2. State Transitions Log (<code>audit_log</code>):</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Actor</th>
+            <th>Action</th>
+            <th>State Transition</th>
+            <th>Recorded Details (Fencing, Attempts, Worker)</th>
+          </tr>
+        </thead>
+        <tbody id="db-audit-tbody">
+          <tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:12px;">Loading audit events...</td></tr>
         </tbody>
       </table>
     </div>
@@ -536,11 +588,25 @@
         const timeline = data.timeline || {};
 
         document.getElementById('job-id-title').textContent = job.id || jobId;
+        document.getElementById('sql-job-id').textContent = job.id || jobId;
         document.getElementById('job-type-sub').textContent = `Type: ${escapeHtml(job.job_type || '')}`;
         document.getElementById('job-state-badge').innerHTML = `<span class="badge badge-${job.state}">${job.state}</span>`;
         document.getElementById('job-created').textContent = job.created_at || '-';
         document.getElementById('job-finished').textContent = job.finished_at || 'In Flight / Pending';
         document.getElementById('job-attempts-count').textContent = `${(timeline.attempts || []).length} attempt(s)`;
+        document.getElementById('job-fencing-token').textContent = job.fencing_token ? `#${job.fencing_token}` : '0 (None)';
+        document.getElementById('job-worker-id').textContent = job.worker_id || 'None (Unassigned)';
+
+        const leaseTtl = document.getElementById('job-lease-ttl');
+        if (job.state === 'LEASED') {
+          leaseTtl.innerHTML = `<span style="color:#fde68a;">⏳ ${job.lease_expires_in_sec || 0}s remaining &bull; 💓 Active Heartbeat</span>`;
+        } else if (job.state === 'SUCCEEDED') {
+          leaseTtl.innerHTML = `<span style="color:#6ee7b7;">Lease Released on Completion</span>`;
+        } else if (job.state === 'DEAD') {
+          leaseTtl.innerHTML = `<span style="color:#fca5a5;">Lease Revoked (Dead-Lettered)</span>`;
+        } else {
+          leaseTtl.textContent = 'Standby';
+        }
 
         // Payload (truncated at 2 KB and escaped)
         let payloadStr = '';
@@ -555,12 +621,20 @@
 
         // Render Attempts Bands
         const attContainer = document.getElementById('attempts-container');
+        const dbAttemptsTbody = document.getElementById('db-attempts-tbody');
         const attempts = timeline.attempts || [];
         if (attempts.length === 0) {
           attContainer.innerHTML = '<div style="color:#94a3b8;">No execution attempts recorded.</div>';
+          if (dbAttemptsTbody) dbAttemptsTbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#94a3b8; padding:12px;">No attempts in database yet.</td></tr>';
         } else {
           attContainer.innerHTML = attempts.map(att => {
             const outcome = att.outcome || 'in_flight';
+            let outcomeDesc = '';
+            if (outcome === 'lease_expired') {
+              outcomeDesc = '<div style="margin-top:8px; font-size:12px; color:#fca5a5; font-weight:600;">💥 Worker stopped heartbeating. Background Reaper detected lease expiry at ' + (att.finished_at ? new Date(att.finished_at).toLocaleTimeString() : '') + ' and reset work for Attempt #' + (att.attempt_no + 1) + '.</div>';
+            } else if (outcome === 'succeeded') {
+              outcomeDesc = '<div style="margin-top:8px; font-size:12px; color:#6ee7b7; font-weight:600;">✅ Worker successfully executed task with Fencing Token #' + att.fencing_token + ' and committed to ledger.</div>';
+            }
             return `
               <div class="attempt-band ${outcome}">
                 <div class="attempt-header">
@@ -568,36 +642,81 @@
                   <span class="chip chip-${outcome}">${outcome.toUpperCase()}</span>
                 </div>
                 <div class="attempt-meta">
-                  <span>Fencing Token: <strong>${att.fencing_token}</strong></span>
+                  <span>Fencing Token: <strong>#${att.fencing_token}</strong></span>
                   <span>Started: ${att.started_at ? new Date(att.started_at).toLocaleTimeString() : '-'}</span>
                   <span>Finished: ${att.finished_at ? new Date(att.finished_at).toLocaleTimeString() : 'Active'}</span>
                 </div>
+                ${outcomeDesc}
                 ${att.error_message ? `<div style="margin-top:10px; font-size:12px; color:#fca5a5; background:rgba(239,68,68,0.1); padding:6px 10px; border-radius:4px;">Error: ${escapeHtml(att.error_message)}</div>` : ''}
               </div>
             `;
           }).join('');
+
+          if (dbAttemptsTbody) {
+            dbAttemptsTbody.innerHTML = attempts.map(att => {
+              const outcome = att.outcome || 'in_flight';
+              let badgeStyle = 'background:#1e293b; color:#cbd5e1;';
+              if (outcome === 'succeeded') badgeStyle = 'background:#064e3b; color:#6ee7b7;';
+              else if (outcome === 'lease_expired') badgeStyle = 'background:#7f1d1d; color:#fca5a5;';
+              return `
+                <tr>
+                  <td style="font-weight:700;">Attempt #${att.attempt_no}</td>
+                  <td><code>${escapeHtml(att.worker_id)}</code></td>
+                  <td style="font-family:monospace; font-weight:700; color:#38bdf8;">#${att.fencing_token}</td>
+                  <td style="font-family:monospace; font-size:11px;">${att.started_at || '-'}</td>
+                  <td style="font-family:monospace; font-size:11px;">${att.finished_at || 'In Flight'}</td>
+                  <td><span style="${badgeStyle} padding:2px 6px; border-radius:4px; font-size:11px; font-weight:700; text-transform:uppercase;">${outcome}</span></td>
+                </tr>
+              `;
+            }).join('');
+          }
         }
 
         // Render Audit Events Stream
         const evContainer = document.getElementById('events-stream');
+        const dbAuditTbody = document.getElementById('db-audit-tbody');
         const events = timeline.events || [];
         if (events.length === 0) {
           evContainer.innerHTML = '<div style="color:#94a3b8;">No audit events recorded for this job.</div>';
+          if (dbAuditTbody) dbAuditTbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:12px;">No audit events in database.</td></tr>';
         } else {
           evContainer.innerHTML = events.map(ev => {
             const isStale = ev.action === 'stale_write_rejected';
+            const isReaper = ev.from_state === 'LEASED' && ev.to_state === 'QUEUED';
             return `
               <div class="event-node ${isStale ? 'stale' : ''}">
                 <div class="event-time">${ev.timestamp}</div>
                 <div style="font-weight:600; margin-top:2px;">
                   ${escapeHtml(ev.actor)} &bull; ${escapeHtml(ev.action)}
                   ${isStale ? '<span class="event-tag stale">REJECTED 409 (FENCING)</span>' : ''}
+                  ${isReaper ? '<span class="event-tag" style="background:#78350f; color:#fde68a; border:1px solid #f59e0b;">REAPER RECLAIM</span>' : ''}
                 </div>
                 ${ev.from_state ? `<div style="font-size:12px; color:#94a3b8;">State Transition: <code>${ev.from_state} &rarr; ${ev.to_state}</code></div>` : ''}
                 ${ev.details ? `<div style="font-family:monospace; font-size:11px; color:#94a3b8; margin-top:2px;">${escapeHtml(JSON.stringify(ev.details))}</div>` : ''}
               </div>
             `;
           }).join('');
+
+          if (dbAuditTbody) {
+            dbAuditTbody.innerHTML = events.map(ev => {
+              const isReaper = ev.from_state === 'LEASED' && ev.to_state === 'QUEUED';
+              let transBadge = `<code>${ev.from_state || '-'} &rarr; ${ev.to_state || '-'}</code>`;
+              if (isReaper) {
+                transBadge = `<span style="background:#78350f; color:#fde68a; padding:2px 6px; border-radius:4px; font-weight:700;">LEASED &rarr; QUEUED (Reaper Reclaim)</span>`;
+              } else if (ev.to_state === 'SUCCEEDED') {
+                transBadge = `<span style="background:#064e3b; color:#6ee7b7; padding:2px 6px; border-radius:4px; font-weight:700;">LEASED &rarr; SUCCEEDED</span>`;
+              }
+              return `
+                <tr>
+                  <td style="font-family:monospace; font-size:11px;">${ev.timestamp}</td>
+                  <td><code>${escapeHtml(ev.actor)}</code></td>
+                  <td><code>${escapeHtml(ev.action)}</code></td>
+                  <td>${transBadge}</td>
+                  <td style="font-family:monospace; font-size:11px; color:#94a3b8;">${escapeHtml(JSON.stringify(ev.details || {}))}</td>
+                </tr>
+              `;
+            }).join('');
+          }
         }
 
         // Load Downstream Ledger Evidence

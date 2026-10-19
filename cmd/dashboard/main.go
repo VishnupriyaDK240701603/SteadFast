@@ -939,11 +939,15 @@ func (s *Server) handleOpsJobTimeline(w http.ResponseWriter, r *http.Request) {
 		lastError    sql.NullString
 	)
 
-	err = db.QueryRowContext(r.Context(), `
-		SELECT id, tenant_id, job_type, state, attempts, max_attempts, fencing_token, worker_id, payload, created_at, finished_at, last_error
-		FROM jobs
-		WHERE id = $1;
-	`, jobID).Scan(&id, &tenantID, &jobType, &state, &attempts, &maxAttempts, &fencingToken, &workerID, &payloadRaw, &createdAt, &finishedAt, &lastError)
+		var (
+			leaseExpiresAt *time.Time
+			updatedAt      time.Time
+		)
+		err = db.QueryRowContext(r.Context(), `
+			SELECT id, tenant_id, job_type, state, attempts, max_attempts, fencing_token, worker_id, payload, created_at, finished_at, last_error, lease_expires_at, updated_at
+			FROM jobs
+			WHERE id = $1;
+		`, jobID).Scan(&id, &tenantID, &jobType, &state, &attempts, &maxAttempts, &fencingToken, &workerID, &payloadRaw, &createdAt, &finishedAt, &lastError, &leaseExpiresAt, &updatedAt)
 
 	if err != nil {
 		http.Error(w, `{"error":"job_not_found"}`, http.StatusNotFound)
@@ -961,19 +965,33 @@ func (s *Server) handleOpsJobTimeline(w http.ResponseWriter, r *http.Request) {
 		fnAtStr = &formatted
 	}
 
+	var leaseExpStr *string
+	remSec := 0
+	if leaseExpiresAt != nil {
+		s := leaseExpiresAt.Format(time.RFC3339)
+		leaseExpStr = &s
+		diff := int(time.Until(*leaseExpiresAt).Seconds())
+		if diff > 0 {
+			remSec = diff
+		}
+	}
+
 	jobMeta := map[string]any{
-		"id":            id,
-		"tenant_id":     tenantID,
-		"job_type":      jobType,
-		"state":         state,
-		"attempts":      attempts,
-		"max_attempts":  maxAttempts,
-		"fencing_token": fencingToken,
-		"worker_id":     workerID.String,
-		"payload":       payload,
-		"created_at":    createdAt.Format(time.RFC3339),
-		"finished_at":   fnAtStr,
-		"last_error":    lastError.String,
+		"id":                   id,
+		"tenant_id":            tenantID,
+		"job_type":             jobType,
+		"state":                state,
+		"attempts":             attempts,
+		"max_attempts":         maxAttempts,
+		"fencing_token":        fencingToken,
+		"worker_id":            workerID.String,
+		"payload":              payload,
+		"created_at":           createdAt.Format(time.RFC3339),
+		"finished_at":          fnAtStr,
+		"last_error":           lastError.String,
+		"lease_expires_at":     leaseExpStr,
+		"lease_expires_in_sec": remSec,
+		"updated_at":           updatedAt.Format(time.RFC3339),
 	}
 
 	// 2. Query attempts via steadfast_dashboard_ro
