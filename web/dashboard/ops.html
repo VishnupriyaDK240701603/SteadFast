@@ -464,9 +464,15 @@
       btn.disabled = true;
       btn.textContent = 'Enqueuing...';
 
-      let sleepSec = 6;
+      let sleepSec = 8;
       if (document.getElementById('task-duration')) {
-        sleepSec = parseInt(document.getElementById('task-duration').value || '6', 10);
+        sleepSec = parseInt(document.getElementById('task-duration').value || '8', 10);
+        if (isNaN(sleepSec) || sleepSec < 1) sleepSec = 1;
+      }
+      let heartbeatSec = 2;
+      if (document.getElementById('task-heartbeat')) {
+        heartbeatSec = parseInt(document.getElementById('task-heartbeat').value || '2', 10);
+        if (isNaN(heartbeatSec) || heartbeatSec < 1) heartbeatSec = 1;
       }
 
       const payload = {
@@ -474,7 +480,8 @@
         customer_id: document.getElementById('task-customer').value,
         order_id: document.getElementById('task-order').value,
         amount_dollars: parseFloat(document.getElementById('task-amount').value || '0'),
-        sleep_seconds: sleepSec
+        sleep_seconds: sleepSec,
+        heartbeat_interval_seconds: heartbeatSec
       };
 
       try {
@@ -692,15 +699,39 @@
           </div>
         </div>
 
-        <div style="margin-bottom:20px;">
-          <label style="display:block; font-size:11px; text-transform:uppercase; color:#cbd5e1; font-weight:600; margin-bottom:6px;">Task Execution Duration (Observability Window)</label>
-          <select id="task-duration" style="width:100%; box-sizing:border-box; background:#020617; border:1px solid #38bdf8; border-radius:6px; padding:10px; color:#38bdf8; font-weight:700; font-size:13px;">
-            <option value="6" selected>⏱️ 6 Seconds (Standard - Ample time to test Crash or Freeze on Worker)</option>
-            <option value="12">⏱️ 12 Seconds (Extended - Great for observing heartbeats &amp; Reaper recovery)</option>
-            <option value="1">⚡ 1 Second (Fast Execution)</option>
-          </select>
-          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">
-            While the task runs, the worker actively heartbeats and renews its lease. You can crash or freeze that specific worker using the buttons on its card in the Worker Fleet!
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; background:#0b1329; border:1px solid #1e293b; border-radius:8px; padding:14px;">
+          <div>
+            <label style="display:flex; justify-content:space-between; align-items:center; font-size:11px; text-transform:uppercase; color:#38bdf8; font-weight:700; margin-bottom:6px;">
+              <span>⏱️ Task Execution Time</span>
+              <span style="font-size:10px; color:#94a3b8; text-transform:none;">(Seconds)</span>
+            </label>
+            <input type="number" id="task-duration" required min="1" max="600" value="8" placeholder="e.g. 8"
+              style="width:100%; box-sizing:border-box; background:#020617; border:1px solid #38bdf8; border-radius:6px; padding:10px; color:#38bdf8; font-weight:700; font-size:14px;">
+            <div style="font-size:11px; color:#94a3b8; margin-top:4px; line-height:1.3;">
+              Actual time worker spends executing task before completing.
+            </div>
+            <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+              <button type="button" onclick="document.getElementById('task-duration').value='2'" style="background:#1e293b; color:#94a3b8; border:1px solid #334155; border-radius:4px; padding:3px 8px; font-size:10px; font-weight:600; cursor:pointer;">2s Fast</button>
+              <button type="button" onclick="document.getElementById('task-duration').value='8'" style="background:#1e293b; color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:3px 8px; font-size:10px; font-weight:600; cursor:pointer;">8s Normal</button>
+              <button type="button" onclick="document.getElementById('task-duration').value='15'" style="background:#1e293b; color:#fbbf24; border:1px solid #b45309; border-radius:4px; padding:3px 8px; font-size:10px; font-weight:600; cursor:pointer;">15s Crash Demo</button>
+              <button type="button" onclick="document.getElementById('task-duration').value='30'" style="background:#1e293b; color:#94a3b8; border:1px solid #334155; border-radius:4px; padding:3px 8px; font-size:10px; font-weight:600; cursor:pointer;">30s Long</button>
+            </div>
+          </div>
+          <div>
+            <label style="display:flex; justify-content:space-between; align-items:center; font-size:11px; text-transform:uppercase; color:#34d399; font-weight:700; margin-bottom:6px;">
+              <span>💓 Heartbeat Interval</span>
+              <span style="font-size:10px; color:#94a3b8; text-transform:none;">(Seconds)</span>
+            </label>
+            <input type="number" id="task-heartbeat" required min="1" max="60" value="2" placeholder="e.g. 2"
+              style="width:100%; box-sizing:border-box; background:#020617; border:1px solid #10b981; border-radius:6px; padding:10px; color:#34d399; font-weight:700; font-size:14px;">
+            <div style="font-size:11px; color:#94a3b8; margin-top:4px; line-height:1.3;">
+              Frequency at which worker pings API to renew its lease.
+            </div>
+            <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+              <button type="button" onclick="document.getElementById('task-heartbeat').value='1'" style="background:#1e293b; color:#34d399; border:1px solid #059669; border-radius:4px; padding:3px 8px; font-size:10px; font-weight:600; cursor:pointer;">1s Rapid</button>
+              <button type="button" onclick="document.getElementById('task-heartbeat').value='2'" style="background:#1e293b; color:#94a3b8; border:1px solid #334155; border-radius:4px; padding:3px 8px; font-size:10px; font-weight:600; cursor:pointer;">2s Standard</button>
+              <button type="button" onclick="document.getElementById('task-heartbeat').value='4'" style="background:#1e293b; color:#94a3b8; border:1px solid #334155; border-radius:4px; padding:3px 8px; font-size:10px; font-weight:600; cursor:pointer;">4s Slow</button>
+            </div>
           </div>
         </div>
 

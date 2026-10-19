@@ -458,13 +458,15 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 // handleOpsEnqueueJob dispatches a real user task to the Steadfast engine
 func (s *Server) handleOpsEnqueueJob(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Type           string         `json:"type"`
-		CustomerID     string         `json:"customer_id"`
-		AmountDollars  float64        `json:"amount_dollars"`
-		OrderID        string         `json:"order_id"`
-		SimulationMode string         `json:"simulation_mode"`
-		SleepSeconds   int            `json:"sleep_seconds"`
-		Payload        map[string]any `json:"payload"`
+		Type                     string         `json:"type"`
+		CustomerID               string         `json:"customer_id"`
+		AmountDollars            float64        `json:"amount_dollars"`
+		OrderID                  string         `json:"order_id"`
+		SimulationMode           string         `json:"simulation_mode"`
+		SleepSeconds             int            `json:"sleep_seconds"`
+		HeartbeatIntervalSeconds int            `json:"heartbeat_interval_seconds"`
+		HeartbeatSeconds         int            `json:"heartbeat_seconds"`
+		Payload                  map[string]any `json:"payload"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -495,6 +497,13 @@ func (s *Server) handleOpsEnqueueJob(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.SleepSeconds > 0 {
 		payload["sleep_seconds"] = req.SleepSeconds
+	}
+	if req.HeartbeatIntervalSeconds > 0 {
+		payload["heartbeat_interval_seconds"] = req.HeartbeatIntervalSeconds
+		payload["heartbeat_seconds"] = req.HeartbeatIntervalSeconds
+	} else if req.HeartbeatSeconds > 0 {
+		payload["heartbeat_interval_seconds"] = req.HeartbeatSeconds
+		payload["heartbeat_seconds"] = req.HeartbeatSeconds
 	}
 
 	submitBody := map[string]any{

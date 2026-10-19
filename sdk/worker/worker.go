@@ -211,6 +211,20 @@ func processJob(parentCtx context.Context, cfg Config, job *Job) {
 		hbInterval = 200 * time.Millisecond
 	}
 
+	if len(job.Payload) > 0 {
+		var customOpts struct {
+			HeartbeatSeconds         int `json:"heartbeat_seconds"`
+			HeartbeatIntervalSeconds int `json:"heartbeat_interval_seconds"`
+		}
+		if err := json.Unmarshal(job.Payload, &customOpts); err == nil {
+			if customOpts.HeartbeatSeconds > 0 {
+				hbInterval = time.Duration(customOpts.HeartbeatSeconds) * time.Second
+			} else if customOpts.HeartbeatIntervalSeconds > 0 {
+				hbInterval = time.Duration(customOpts.HeartbeatIntervalSeconds) * time.Second
+			}
+		}
+	}
+
 	stopHb := make(chan struct{})
 	hbDone := make(chan struct{})
 

@@ -316,6 +316,8 @@
         <div class="meta-item"><span>Fencing Token</span><div id="job-fencing-token" style="font-family:monospace; font-weight:700; color:#38bdf8;">-</div></div>
         <div class="meta-item"><span>Active Worker</span><div id="job-worker-id" style="font-family:monospace; font-weight:700; color:#cbd5e1;">-</div></div>
         <div class="meta-item"><span>Heartbeat / Lease TTL</span><div id="job-lease-ttl" style="font-family:monospace; font-weight:700;">-</div></div>
+        <div class="meta-item"><span>Configured Task Duration</span><div id="job-duration-display" style="font-family:monospace; font-weight:700; color:#38bdf8;">-</div></div>
+        <div class="meta-item"><span>Heartbeat Interval</span><div id="job-heartbeat-display" style="font-family:monospace; font-weight:700; color:#34d399;">-</div></div>
       </div>
       <div style="margin-top:16px;">
         <span style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600; display:block; margin-bottom:6px;">Payload (Max 2 KiB escaped)</span>
@@ -607,6 +609,12 @@
         } else {
           leaseTtl.textContent = 'Standby';
         }
+
+        // Render configured duration & heartbeat interval
+        let durSec = job.payload && (job.payload.sleep_seconds || job.payload.duration_seconds);
+        let hbSec = job.payload && (job.payload.heartbeat_interval_seconds || job.payload.heartbeat_seconds);
+        document.getElementById('job-duration-display').textContent = durSec ? `${durSec}s (Observed Execution)` : 'Standard (Immediate)';
+        document.getElementById('job-heartbeat-display').textContent = hbSec ? `Every ${hbSec}s` : 'Every 2s (Default)';
 
         // Payload (truncated at 2 KB and escaped)
         let payloadStr = '';
